@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/email/sequence-tick",
+      "schedule": "*/10 * * * *"
+    }
+  ]
+}
