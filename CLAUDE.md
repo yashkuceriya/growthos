@@ -171,20 +171,46 @@ supabase/migrations/
 ## Recharts type gotcha
 - Tooltip `formatter` must NOT type the value param as `number` — use `(value) => [\`$\${Number(value).toFixed(2)}\`, 'label']`
 
+## Phase 5: Agency, Launch & Intelligence (uncommitted, in-progress)
+- **Agency Dashboard** (`app/(app)/agency/page.tsx`): Central hub for 21+ AI-powered department agents (brand, seo, sales, social, content, creative lab, competitive intel, etc.). Clicking a dept calls `/api/agency/<dept>` → agent runs → results merged into `projects.brand_voice` JSONB. Status tiles surface brand-book readiness, competitive intel, current sprint, launch status.
+- **Launch Orchestrator** (`app/(app)/launch/page.tsx` + `api/launch/route.ts`): Multi-channel campaign generator. Runs 4 sequential strategic agents (CMO → SEO → Director review → Analytics), then parallelizes 8 channel generators (Meta, LinkedIn, TikTok, Twitter, Reddit, Email, Blog, Landing). SSE stream emits `agent_status` + `channel_status` events. Writes assets to `ad_copies`, `social_posts`, `email_sequences`/`email_templates`, `content_pieces`, `landing_pages`. Campaign metadata JSONB preserves full audit trail.
+- **Project Ingest** (`api/projects/ingest/route.ts`): Crawls a URL, extracts brand info (tagline, value prop, features, testimonials, colors) via Gemini structured extraction, then runs classifier → vertical, business_model, stage, compliance flags, ICP. All stored in `projects.brand_voice`.
+- **Playbook Registry** (`lib/ai/playbooks/registry.ts`): 16 vertical-specific playbooks (b2b_saas, b2c_saas, ecommerce, marketplace, dev_tool, ai_product, etc.) specifying primary/secondary/skip channels, KPIs, lifecycle templates, CRO focus, content ratios. Launch route uses this to filter channels per product.
+- **Model Router** (`lib/ai/models.ts`): `modelFor('strategic'|'production')`. Strategic (CMO, Director, Brand Hub, Competitive Intel) → Claude Sonnet 4.5 if `ANTHROPIC_API_KEY` set, else Gemini Flash. Production (ads, social, email, landing) → Gemini Flash for cost/volume. Images → Gemini 3.1 Flash Image.
+- **Ad Image Generation** (`api/ai/generate-ad-image/route.ts` + `lib/ai/ad-studio/image-generator.ts`): Calls OpenRouter Gemini Image model with brand-grounded visual prompts. Accepts aspect ratios (1:1, 9:16, 1.91:1). Stores URLs in `ad_copies.media_urls`. ~$0.04/image.
+- **Founder Voice** (`lib/ai/voice/founder-voice.ts`): Per-user (not per-project) voice samples + style references injected into strategic agents — lets founder tone carry across products.
+- **Classifier** (`lib/ai/intelligence/classifier.ts`): Auto-tags products with vertical (16 types), business model, target market, stage, compliance requirements (GDPR/HIPAA/FTC), pricing tier, ICP.
+- **Brand Hub** (`lib/ai/agency/brand-hub.ts`): `generateBrandGuidelines()` — positioning, mission, 4 voice traits with we_are/we_are_not, tone-by-context, messaging matrix, taglines, elevator pitches, vocabulary, brand story.
+- **JSON Viewer** (`components/ui/json-viewer.tsx`): Generic nested JSON renderer. Humanizes keys, copy-to-clipboard, renders arrays as pills, objects as definition lists. Used across agency result pages.
+- **Sidebar**: `/agency` and `/launch` added before Dashboard.
+- **Stub dirs** (reserved, mostly empty): `lib/ai/{benchmarks,compliance,market,seo,tools}/`, `lib/deploy/`.
+- **Package**: Added `@ai-sdk/anthropic` for Claude routing.
+
+### Phase 5 Tables (007_ad_media.sql + 008_internal_ops.sql)
+- `ad_copies.media_urls text[]` — added column for generated image URLs
+- `founder_voice` — per-user voice samples + style notes (RLS: `auth.uid() = user_id`)
+- `style_references` — winning-asset memory (user- or project-scoped). `asset_kind`, `asset_content`, `why_good`, `metric_proof`. Index on `(user_id, asset_kind)` for fast retrieval by channel.
+
+### Key Phase 5 patterns
+- **JSONB consolidation**: Brand book, competitive intel, market intel, classification all live in `projects.brand_voice` — no schema churn per agent.
+- **Playbook-driven channel selection**: `/api/launch` skips channels not in the vertical's playbook (e.g., B2B SaaS skips TikTok).
+- **Model fallback**: Strategic agents prefer Claude; fall back to Gemini silently if no `ANTHROPIC_API_KEY`.
+- **Founder voice is user-scoped**: lives in `founder_voice` table keyed by `user_id`, not `project_id`, so tone transfers across products.
+
 ## What's NOT Done Yet
-- Social platform OAuth (publishing to Twitter/LinkedIn/Instagram)
-- Supabase not connected (placeholder .env.local)
+- Social platform OAuth (publishing to Twitter/LinkedIn/Instagram) — `lib/deploy/twitter.ts` is a stub
 - No `supabase gen types` — untyped clients
-- Image generation for ads
 - Email sequence step executor (auto-send on schedule/trigger)
 - CSV subscriber import UI
+- `lib/ai/{benchmarks,compliance,market,seo,tools}/` dirs exist but are mostly empty
 
 ## To Run
 1. Create Supabase project → copy URL + anon key + service role key to `.env.local`
-2. Run all 6 migrations in order: `001_core_schema.sql` through `006_budget_tracker.sql`
+2. Run all 8 migrations in order: `001_core_schema.sql` through `008_internal_ops.sql`
 3. Add OpenRouter API key to `.env.local`
-4. Optionally add `RESEND_API_KEY` and `RESEND_FROM_EMAIL` for email sending
-5. `npm run dev`
+4. Optionally add `ANTHROPIC_API_KEY` for Claude-powered strategic agents (falls back to Gemini)
+5. Optionally add `RESEND_API_KEY` and `RESEND_FROM_EMAIL` for email sending
+6. `npm run dev`
 
 ## Related Projects
 - Interview Journey: `/Users/yash/Downloads/interview-journey/` — same stack, patterns copied from here
