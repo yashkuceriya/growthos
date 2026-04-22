@@ -1,14 +1,17 @@
 // Market Intelligence — scans Reddit (playbook subreddits), HN, optional RSS
 // and synthesizes trending themes, pains, gaps, angles via LLM.
+export const runtime = 'nodejs'
+export const maxDuration = 120
+
 import { createClient } from '@/lib/supabase/server'
 import { generateObject } from 'ai'
 import { modelFor } from '@/lib/ai/models'
 import { z } from 'zod'
 import { trackAICost } from '@/lib/cost-tracker'
-import { getPlaybook } from '@/lib/ai/playbooks/registry'
 import type { Vertical } from '@/lib/ai/intelligence/classifier'
 import { pickSubreddits } from '@/lib/ai/launch/specs'
 import { fetchSubredditTop, fetchHNTopStories, fetchRss } from '@/lib/ai/market/pullers'
+import { mergeBrandVoice } from '@/lib/brand-voice'
 
 const SynthesisSchema = z.object({
   scanned_at: z.string(),
@@ -116,9 +119,8 @@ Synthesize market intelligence. Today's date: ${new Date().toISOString().slice(0
 
   const intel = { ...synth.object, scanned_at: new Date().toISOString() }
 
-  // Persist into project.brand_voice.market_intel
-  const merged = { ...bv, market_intel: intel, market_intel_scanned_at: intel.scanned_at }
-  await supabase.from('projects').update({ brand_voice: merged }).eq('id', projectId)
+  // Atomic shallow merge via RPC
+  await mergeBrandVoice(supabase, projectId, { market_intel: intel, market_intel_scanned_at: intel.scanned_at })
 
   await trackAICost({ userId: user.id, projectId, module: 'market_intel', costUsd: 0.10, latencyMs: Date.now() - startedAt })
 

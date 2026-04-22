@@ -7,6 +7,9 @@ import { z } from 'zod'
 import { trackAICost } from '@/lib/cost-tracker'
 import { getPlaybook } from '@/lib/ai/playbooks/registry'
 import type { Vertical } from '@/lib/ai/intelligence/classifier'
+import { wrapHandler } from '@/lib/api-error'
+
+export const maxDuration = 120
 
 // ——————————————— LIFECYCLE STAGE LIBRARY ———————————————
 // Each stage = a purpose + trigger + cadence. Generator produces copy per stage.
@@ -114,7 +117,7 @@ const LifecycleResultSchema = z.object({
   emails: z.array(EmailSchema),
 })
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
@@ -193,3 +196,5 @@ WEBSITE: ${project.website ?? ''}`
     saved_template_ids: saved,
   })
 }
+
+export const POST = wrapHandler(handlePost, 'agency/lifecycle')

@@ -4,6 +4,9 @@ import { modelFor } from '@/lib/ai/models'
 import { z } from 'zod'
 import { trackAICost } from '@/lib/cost-tracker'
 import type { Vertical } from '@/lib/ai/intelligence/classifier'
+import { wrapHandler } from '@/lib/api-error'
+
+export const maxDuration = 120
 
 const ReferralSchema = z.object({
   mechanic: z.object({
@@ -122,7 +125,7 @@ const AmbassadorSchema = z.object({
 
 type Tool = 'referral' | 'affiliate' | 'community' | 'ugc' | 'ambassador'
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
@@ -204,3 +207,5 @@ PRICING: ${bv.pricing ?? ''}`
 
   return Response.json({ tool, vertical, result })
 }
+
+export const POST = wrapHandler(handlePost, 'agency/growth-loops')

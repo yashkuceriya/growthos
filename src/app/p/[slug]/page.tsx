@@ -87,6 +87,15 @@ export default async function PublicLandingPage({ params }: { params: Promise<{ 
                   backgroundColor: '#1e293b', color: '#fff', fontSize: '16px', outline: 'none',
                 }}
               />
+              {/* Honeypot — real users never fill this; bots usually do */}
+              <input
+                name="website"
+                type="text"
+                tabIndex={-1}
+                autoComplete="off"
+                aria-hidden="true"
+                style={{ position: 'absolute', left: '-10000px', width: '1px', height: '1px', opacity: 0 }}
+              />
               <button
                 type="submit"
                 style={{
@@ -105,13 +114,18 @@ export default async function PublicLandingPage({ params }: { params: Promise<{ 
           </p>
         </div>
 
-        {/* Client-side form handler */}
+        {/* Client-side form handler — forwards UTM + campaign attribution from URL params */}
         <script dangerouslySetInnerHTML={{ __html: `
           document.querySelector('form').addEventListener('submit', async function(e) {
             e.preventDefault();
             const fd = new FormData(this);
             const body = Object.fromEntries(fd.entries());
-            const btn = this.querySelector('button');
+            var qs = new URLSearchParams(window.location.search);
+            ['utm_source','utm_medium','utm_campaign','utm_content','utm_term'].forEach(function(k){
+              var v = qs.get(k); if (v) body[k] = v;
+            });
+            var cid = qs.get('campaign_id'); if (cid) body.campaignId = cid;
+            var btn = this.querySelector('button');
             btn.textContent = 'Submitting...';
             btn.disabled = true;
             try {

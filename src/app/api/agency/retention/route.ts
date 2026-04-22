@@ -4,6 +4,9 @@ import { modelFor } from '@/lib/ai/models'
 import { z } from 'zod'
 import { trackAICost } from '@/lib/cost-tracker'
 import type { Vertical } from '@/lib/ai/intelligence/classifier'
+import { wrapHandler } from '@/lib/api-error'
+
+export const maxDuration = 120
 
 const CohortAnalysisSchema = z.object({
   cohort_definition: z.string(),
@@ -95,7 +98,7 @@ const CustomerHealthSchema = z.object({
 
 type Tool = 'cohort_analysis' | 'churn_predictor' | 'reactivation' | 'nps_synthesizer' | 'customer_health'
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
@@ -177,3 +180,5 @@ BUSINESS MODEL: ${(bv.classification as { business_model?: string } | undefined)
 
   return Response.json({ tool, vertical, result })
 }
+
+export const POST = wrapHandler(handlePost, 'agency/retention')

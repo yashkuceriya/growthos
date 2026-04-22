@@ -4,6 +4,9 @@ import { modelFor } from '@/lib/ai/models'
 import { z } from 'zod'
 import { trackAICost } from '@/lib/cost-tracker'
 import type { Vertical } from '@/lib/ai/intelligence/classifier'
+import { wrapHandler } from '@/lib/api-error'
+
+export const maxDuration = 120
 
 const CreativeBriefSchema = z.object({
   project_name: z.string(),
@@ -102,7 +105,7 @@ const AdVariantPackSchema = z.object({
 
 type Tool = 'creative_brief' | 'testing_matrix' | 'video_script' | 'lp_wireframe' | 'ad_variant_pack'
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
@@ -190,3 +193,5 @@ WEBSITE: ${project.website ?? ''}`
 
   return Response.json({ tool, vertical, result })
 }
+
+export const POST = wrapHandler(handlePost, 'agency/creative-lab')

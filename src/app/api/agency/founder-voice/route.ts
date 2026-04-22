@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
+import { wrapHandler, wrapHandlerNoArgs } from '@/lib/api-error'
 
-export async function GET() {
+async function handleGet() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
@@ -8,7 +9,7 @@ export async function GET() {
   return Response.json({ samples: data?.samples ?? [], style_notes: data?.style_notes ?? '' })
 }
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
@@ -21,3 +22,6 @@ export async function POST(request: Request) {
   })
   return Response.json({ ok: true })
 }
+
+export const GET = wrapHandlerNoArgs(handleGet, 'agency/founder-voice')
+export const POST = wrapHandler(handlePost, 'agency/founder-voice')

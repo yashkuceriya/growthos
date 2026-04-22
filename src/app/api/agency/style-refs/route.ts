@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
+import { wrapHandler } from '@/lib/api-error'
 
-export async function GET(request: Request) {
+async function handleGet(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
@@ -12,7 +13,7 @@ export async function GET(request: Request) {
   return Response.json({ refs: data ?? [] })
 }
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
@@ -29,7 +30,7 @@ export async function POST(request: Request) {
   return Response.json({ id: data?.id })
 }
 
-export async function DELETE(request: Request) {
+async function handleDelete(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
@@ -37,3 +38,7 @@ export async function DELETE(request: Request) {
   await supabase.from('style_references').delete().eq('user_id', user.id).eq('id', id)
   return Response.json({ ok: true })
 }
+
+export const GET = wrapHandler(handleGet, 'agency/style-refs')
+export const POST = wrapHandler(handlePost, 'agency/style-refs')
+export const DELETE = wrapHandler(handleDelete, 'agency/style-refs')

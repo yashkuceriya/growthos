@@ -1,3 +1,6 @@
+export const runtime = 'nodejs'
+export const maxDuration = 300
+
 import { createClient } from '@/lib/supabase/server'
 import {
   genMetaAd, genLinkedInAssets, genTikTokAssets, genTwitterThread,
@@ -5,12 +8,12 @@ import {
   type LaunchContext,
 } from '@/lib/ai/launch/generators'
 import { cmoStrategist, seoSpecialist, directorReview, analyticsAgent } from '@/lib/ai/launch/agents'
-import { trackAICost } from '@/lib/cost-tracker'
 import { getPlaybook } from '@/lib/ai/playbooks/registry'
 import type { Vertical } from '@/lib/ai/intelligence/classifier'
 import { getFounderVoiceContext } from '@/lib/ai/voice/founder-voice'
-import { withRetries, generateAdImagesForCopy, brandContextFromCtx } from '@/lib/ai/launch/utils'
+import { withRetries, generateAdImagesForCopy, brandContextFromCtx, type TrackOpts } from '@/lib/ai/launch/utils'
 import { extractLaunchInsights, type LaunchInsights } from '@/lib/ai/launch/insight-extractor'
+import { mergeBrandVoice } from '@/lib/brand-voice'
 
 // Channel ids the UI renders — must match keys below
 const ALL_CHANNELS = ['meta', 'linkedin', 'tiktok', 'twitter', 'reddit', 'email', 'blog', 'landing'] as const
@@ -68,19 +71,21 @@ export async function POST(request: Request) {
 
       send('start', { channels: CHANNELS, vertical: classification?.vertical ?? 'other', playbook: { kpis: playbook.kpis, launch_tactics: playbook.launch_tactics } })
 
+      const track: TrackOpts = { userId: user.id, projectId }
+
       // —————— AGENT CHAIN ——————
       // Step 1: CMO produces the strategic brief
       send('agent_status', { agent: 'cmo', status: 'working', label: 'CMO setting strategy…' })
-      const brief = await withRetries(() => cmoStrategist(ctx), 'cmo')
+      const brief = await withRetries(() => cmoStrategist(ctx, track), 'cmo')
       send('agent_status', { agent: 'cmo', status: 'done', output: brief })
 
       // Step 2: SEO specialist designs keyword plan off the brief
       send('agent_status', { agent: 'seo', status: 'working', label: 'SEO researching keywords…' })
-      const seoPlan = await withRetries(() => seoSpecialist(ctx, brief), 'seo')
+      const seoPlan = await withRetries(() => seoSpecialist(ctx, brief, track), 'seo')
       send('agent_status', { agent: 'seo', status: 'done', output: seoPlan })
 
       // Step 3: Analytics sets experiments + UTM scheme (parallel with channels)
-      const analyticsPromise = withRetries(() => analyticsAgent(ctx, brief), 'analytics').catch((e) => {
+      const analyticsPromise = withRetries(() => analyticsAgent(ctx, brief, track), 'analytics').catch((e) => {
         console.error('[launch][analytics]', e); return null
       })
 
@@ -118,19 +123,15 @@ export async function POST(request: Request) {
       }
 
       // Step 4: Run all channels in parallel, each saves its own rows
+      // Cost tracking happens inside each gen* via the track opts — no fixed-rate stub here
       const channelOutputs: Record<string, string> = {}
       const jobs: Array<Promise<void>> = CHANNELS.map(async (channel) => {
         const startedAt = Date.now()
         send('channel_status', { channel, status: 'generating' })
         try {
-          const summary = await runChannel(channel, enrichedCtx, project.id, user.id, campaignId, supabase, project.slug)
+          const summary = await runChannel(channel, enrichedCtx, project.id, user.id, campaignId, supabase, project.slug, track)
           channelOutputs[channel] = summary
           send('channel_status', { channel, status: 'ready', ms: Date.now() - startedAt })
-          await trackAICost({
-            userId: user.id, projectId, module: `launch_${channel}`,
-            model: 'google/gemini-2.0-flash-001',
-            costUsd: 0.003, latencyMs: Date.now() - startedAt,
-          })
         } catch (err) {
           console.error(`[launch][${channel}]`, err)
           send('channel_status', { channel, status: 'failed', error: err instanceof Error ? err.message : 'Unknown' })
@@ -147,7 +148,7 @@ export async function POST(request: Request) {
       send('agent_status', { agent: 'director', status: 'working', label: 'Director reviewing campaign…' })
       let review = null
       try {
-        review = await withRetries(() => directorReview(ctx, brief, seoPlan, channelOutputs), 'director')
+        review = await withRetries(() => directorReview(ctx, brief, seoPlan, channelOutputs, track), 'director')
         send('agent_status', { agent: 'director', status: 'done', output: review })
       } catch (err) {
         console.error('[launch][director]', err)
@@ -164,20 +165,19 @@ export async function POST(request: Request) {
         })
         send('agent_status', { agent: 'insights', status: 'done', output: insights })
 
-        // Merge into projects.brand_voice.insights (keep last 5 in history)
+        // Merge insights atomically (keep last 5 in history). History needs deep-merge
+        // semantics which the RPC doesn't do, so we read → compute → merge just the
+        // insights subtree. Still atomic at the brand_voice top level.
         const prev = (bv.insights as { history?: unknown[] } | undefined)
         const history = Array.isArray(prev?.history) ? prev.history.slice(-4) : []
-        await supabase.from('projects').update({
-          brand_voice: {
-            ...bv,
-            insights: {
-              last_updated: new Date().toISOString(),
-              last_campaign_id: campaignId,
-              current: insights,
-              history: [...history, { campaign_id: campaignId, timestamp: new Date().toISOString(), insights }],
-            },
+        await mergeBrandVoice(supabase, projectId, {
+          insights: {
+            last_updated: new Date().toISOString(),
+            last_campaign_id: campaignId,
+            current: insights,
+            history: [...history, { campaign_id: campaignId, timestamp: new Date().toISOString(), insights }],
           },
-        }).eq('id', projectId)
+        })
       } catch (err) {
         console.error('[launch][insights]', err)
         send('agent_status', { agent: 'insights', status: 'failed', error: err instanceof Error ? err.message : 'Unknown' })
@@ -222,12 +222,13 @@ async function runChannel(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: any,
   projectSlug: string,
+  track: TrackOpts,
 ): Promise<string> {
   const brandContext = brandContextFromCtx(ctx)
 
   switch (channel) {
     case 'meta': {
-      const ad = await withRetries(() => genMetaAd(ctx), 'meta')
+      const ad = await withRetries(() => genMetaAd(ctx, track), 'meta')
       const { data: brief } = await supabase.from('ad_briefs').insert({
         user_id: userId, project_id: projectId, campaign_id: campaignId,
         platform: 'meta', audience_segment: ctx.audience, product_offer: ctx.valueProp,
@@ -253,7 +254,7 @@ async function runChannel(
       return `Headline: ${ad.headline}\nBody: ${ad.primary_text}\nCTA: ${ad.cta_button}`
     }
     case 'linkedin': {
-      const assets = await withRetries(() => genLinkedInAssets(ctx), 'linkedin')
+      const assets = await withRetries(() => genLinkedInAssets(ctx, track), 'linkedin')
       const { data: brief } = await supabase.from('ad_briefs').insert({
         user_id: userId, project_id: projectId, campaign_id: campaignId,
         platform: 'linkedin', audience_segment: ctx.audience,
@@ -288,7 +289,7 @@ async function runChannel(
       return `Sponsored: ${assets.sponsored_post.headline} — ${assets.sponsored_post.text}\nOrganic: ${assets.organic_posts.length} posts`
     }
     case 'tiktok': {
-      const { reels } = await withRetries(() => genTikTokAssets(ctx), 'tiktok')
+      const { reels } = await withRetries(() => genTikTokAssets(ctx, track), 'tiktok')
       for (const reel of reels) {
         await supabase.from('social_posts').insert({
           user_id: userId, project_id: projectId, platform: 'tiktok',
@@ -300,7 +301,7 @@ async function runChannel(
       return `${reels.length} reels. Top hooks: ${reels.map((r) => r.hook).join(' | ')}`
     }
     case 'twitter': {
-      const thread = await withRetries(() => genTwitterThread(ctx), 'twitter')
+      const thread = await withRetries(() => genTwitterThread(ctx, track), 'twitter')
       // Save thread as one post with full text, plus each standalone
       await supabase.from('social_posts').insert({
         user_id: userId, project_id: projectId, platform: 'twitter',
@@ -319,7 +320,7 @@ async function runChannel(
     }
     case 'reddit': {
       const voice = await getFounderVoiceContext(userId, 'reddit').catch(() => '')
-      const { posts } = await withRetries(() => genRedditPosts(ctx, voice), 'reddit')
+      const { posts } = await withRetries(() => genRedditPosts(ctx, voice, track), 'reddit')
       for (const p of posts) {
         await supabase.from('social_posts').insert({
           user_id: userId, project_id: projectId, platform: 'reddit',
@@ -331,7 +332,7 @@ async function runChannel(
       return `3 subreddit posts: ${posts.map((p) => `r/${p.subreddit} — "${p.title}"`).join(' | ')}`
     }
     case 'email': {
-      const { emails } = await withRetries(() => genEmailSequence(ctx), 'email')
+      const { emails } = await withRetries(() => genEmailSequence(ctx, track), 'email')
       // Create a sequence + 3 templates + 3 steps
       const { data: seq } = await supabase.from('email_sequences').insert({
         user_id: userId, project_id: projectId,
@@ -357,9 +358,9 @@ async function runChannel(
       return `${emails.length}-email welcome sequence. Subjects: ${emails.map((e) => e.subject).join(' | ')}`
     }
     case 'blog': {
-      const post = await withRetries(() => genBlogPost(ctx), 'blog')
+      const post = await withRetries(() => genBlogPost(ctx, track), 'blog')
       await supabase.from('content_pieces').insert({
-        user_id: userId, project_id: projectId,
+        user_id: userId, project_id: projectId, campaign_id: campaignId,
         title: post.title, slug: post.slug,
         body_markdown: post.body_markdown,
         content_type: 'blog_post', status: 'drafting',
@@ -370,10 +371,10 @@ async function runChannel(
       return `Blog: "${post.title}" (${post.body_markdown.split(/\s+/).length} words) targeting ${post.target_keywords.join(', ')}`
     }
     case 'landing': {
-      const page = await withRetries(() => genLandingPage(ctx), 'landing')
+      const page = await withRetries(() => genLandingPage(ctx, track), 'landing')
       const slug = `${projectSlug}-${Date.now().toString(36).slice(-4)}`
       await supabase.from('landing_pages').insert({
-        user_id: userId, project_id: projectId,
+        user_id: userId, project_id: projectId, campaign_id: campaignId,
         name: `${ctx.productName} Launch Page`,
         slug,
         template: {

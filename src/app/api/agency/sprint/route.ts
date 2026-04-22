@@ -3,6 +3,10 @@ import { generateObject } from 'ai'
 import { modelFor } from '@/lib/ai/models'
 import { z } from 'zod'
 import { trackAICost } from '@/lib/cost-tracker'
+import { wrapHandler } from '@/lib/api-error'
+import { mergeBrandVoice } from '@/lib/brand-voice'
+
+export const maxDuration = 120
 
 const SprintPlanSchema = z.object({
   sprint_theme: z.string().describe('Single theme tying this week together'),
@@ -30,7 +34,7 @@ const SprintPlanSchema = z.object({
   week_end_review: z.string().describe('What the agency will report on Sunday'),
 })
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
@@ -56,14 +60,12 @@ CURRENT THEME: ${bv.positioning_statement ?? ''}
 Design this week's marketing sprint. Week starts Monday. Balance paid/organic/content/community/outreach.` }],
   })
 
-  // Save to project metadata
+  // Atomic shallow merge via RPC
   const week = new Date().toISOString().slice(0, 10)
-  const merged = {
-    ...bv,
+  await mergeBrandVoice(supabase, projectId, {
     current_sprint: { ...res.object, week_start: week },
     sprint_generated_at: new Date().toISOString(),
-  }
-  await supabase.from('projects').update({ brand_voice: merged }).eq('id', projectId)
+  })
 
   await trackAICost({
     userId: user.id, projectId, module: 'agency_sprint',
@@ -72,3 +74,5 @@ Design this week's marketing sprint. Week starts Monday. Balance paid/organic/co
 
   return Response.json({ sprint: res.object })
 }
+
+export const POST = wrapHandler(handlePost, 'agency/sprint')

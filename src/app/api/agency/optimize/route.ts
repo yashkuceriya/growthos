@@ -7,6 +7,9 @@ import { trackAICost } from '@/lib/cost-tracker'
 import { getPlaybook } from '@/lib/ai/playbooks/registry'
 import type { Vertical } from '@/lib/ai/intelligence/classifier'
 import { complianceForVertical } from '@/lib/ai/compliance/rules'
+import { wrapHandler } from '@/lib/api-error'
+
+export const maxDuration = 120
 
 // ————————————————— Schemas —————————————————
 
@@ -90,7 +93,7 @@ const ABHypothesisSchema = z.object({
 
 // ————————————————— Dispatcher —————————————————
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
@@ -220,3 +223,5 @@ CRO FOCUS FOR THIS VERTICAL: ${pb.cro_focus.join(', ')}`
 
   return Response.json({ tool, vertical, result })
 }
+
+export const POST = wrapHandler(handlePost, 'agency/optimize')
