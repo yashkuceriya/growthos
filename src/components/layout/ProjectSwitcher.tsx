@@ -30,17 +30,15 @@ export function ProjectSwitcher() {
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger>
-        <button className="flex w-full items-center gap-2 rounded-md border border-slate-700 bg-slate-800/60 px-2.5 py-2 hover:border-slate-600">
-          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-emerald-500/15 text-emerald-400">
-            <Folder className="h-3.5 w-3.5" />
-          </div>
-          <div className="flex-1 text-left min-w-0">
-            <div className="text-[9px] font-semibold uppercase tracking-wider text-slate-500">Active Project</div>
-            <div className="text-xs font-semibold text-slate-100 truncate">{activeProject?.name ?? 'Select project'}</div>
-          </div>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-500" />
-        </button>
+      <DropdownMenuTrigger className="flex w-full items-center gap-2 rounded-md border border-slate-700 bg-slate-800/60 px-2.5 py-2 hover:border-slate-600">
+        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-emerald-500/15 text-emerald-400">
+          <Folder className="h-3.5 w-3.5" />
+        </div>
+        <div className="flex-1 text-left min-w-0">
+          <div className="text-[9px] font-semibold uppercase tracking-wider text-slate-500">Active Project</div>
+          <div className="text-xs font-semibold text-slate-100 truncate">{activeProject?.name ?? 'Select project'}</div>
+        </div>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-500" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56 border-slate-700 bg-slate-900">
         {projects.map((project) => {

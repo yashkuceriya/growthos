@@ -8,11 +8,13 @@ import { toast } from 'sonner'
 import {
   LayoutDashboard, Megaphone, Sparkles, Mail, Share2, FileText, Users,
   BarChart3, DollarSign, Settings, LogOut, Zap, HelpCircle, FolderKanban,
-  Globe, Plus,
+  Globe, Plus, Rocket, Briefcase,
 } from 'lucide-react'
 import { ProjectSwitcher } from './ProjectSwitcher'
 
 const primaryNav = [
+  { href: '/agency', label: 'Agency', icon: Briefcase },
+  { href: '/launch', label: 'Launch', icon: Rocket },
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/projects', label: 'Projects', icon: FolderKanban },
   { href: '/campaigns', label: 'Campaigns', icon: Megaphone },
