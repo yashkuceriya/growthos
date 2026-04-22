@@ -10,11 +10,13 @@ import { PageHeader } from '@/components/ui/page-header'
 import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { DollarSign, Plus, Trash2, TrendingDown } from 'lucide-react'
+import { DollarSign, Plus, Trash2, TrendingDown, Sparkles } from 'lucide-react'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts'
 
 interface Campaign { id: string; name: string }
 interface BudgetAllocation { id: string; campaign_id: string; channel: string; planned_amount: number; period_start: string; period_end: string }
 interface BudgetExpense { id: string; allocation_id: string; amount: number; description: string | null; date: string }
+interface AiCostRow { module: string; cost_usd: number | null; input_tokens: number | null; output_tokens: number | null; created_at: string }
 
 const PIE = ['#34d399', '#059669', '#06b6d4', '#f59e0b', '#f43f5e', '#8b5cf6', '#ec4899', '#f97316']
 
@@ -25,6 +27,7 @@ export default function BudgetPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [allocations, setAllocations] = useState<BudgetAllocation[]>([])
   const [expenses, setExpenses] = useState<BudgetExpense[]>([])
+  const [aiCosts, setAiCosts] = useState<AiCostRow[]>([])
   const [loading, setLoading] = useState(true)
 
   const [aOpen, setAOpen] = useState(false)
@@ -60,6 +63,18 @@ export default function BudgetPage() {
     } else {
       setAllocations([]); setExpenses([])
     }
+
+    // AI costs from ledger (last 30 days, per active project)
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+    const aiRes = await supabase
+      .from('ai_cost_ledger')
+      .select('module, cost_usd, input_tokens, output_tokens, created_at')
+      .eq('project_id', activeProject.id)
+      .gte('created_at', thirtyDaysAgo)
+      .order('created_at', { ascending: false })
+      .limit(2000)
+    setAiCosts((aiRes.data as AiCostRow[]) ?? [])
+
     setLoading(false)
   }
 
@@ -72,6 +87,21 @@ export default function BudgetPage() {
   const totalAllocated = useMemo(() => allocations.reduce((s, a) => s + (a.planned_amount || 0), 0), [allocations])
   const totalSpent = useMemo(() => expenses.reduce((s, e) => s + (e.amount || 0), 0), [expenses])
   const remaining = totalAllocated - totalSpent
+
+  const aiTotal30d = useMemo(() => aiCosts.reduce((s, r) => s + (r.cost_usd ?? 0), 0), [aiCosts])
+  const aiTotal7d = useMemo(() => {
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+    return aiCosts.filter((r) => new Date(r.created_at).getTime() >= sevenDaysAgo).reduce((s, r) => s + (r.cost_usd ?? 0), 0)
+  }, [aiCosts])
+  const aiByModule = useMemo(() => {
+    const m: Record<string, number> = {}
+    aiCosts.forEach((r) => { m[r.module] = (m[r.module] ?? 0) + (r.cost_usd ?? 0) })
+    return Object.entries(m)
+      .map(([module, cost]) => ({ module, cost: +cost.toFixed(4) }))
+      .sort((a, b) => b.cost - a.cost)
+      .slice(0, 10)
+  }, [aiCosts])
+  const aiTotalTokens = useMemo(() => aiCosts.reduce((s, r) => s + (r.input_tokens ?? 0) + (r.output_tokens ?? 0), 0), [aiCosts])
 
   const spendByChannel = useMemo(() => {
     const m: Record<string, number> = {}
@@ -180,6 +210,39 @@ export default function BudgetPage() {
           </>
         }
       />
+
+      <SectionPanel title={`AI Spend (last 30 days) — ${aiCosts.length} calls · ${aiTotalTokens.toLocaleString()} tokens`}>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="rounded-md border border-slate-800 bg-slate-900/60 p-4">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1.5"><Sparkles className="h-3 w-3" /> 7d spend</div>
+            <div className="font-mono-data text-2xl font-semibold text-slate-100">${aiTotal7d.toFixed(2)}</div>
+          </div>
+          <div className="rounded-md border border-slate-800 bg-slate-900/60 p-4">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1.5"><Sparkles className="h-3 w-3" /> 30d spend</div>
+            <div className="font-mono-data text-2xl font-semibold text-slate-100">${aiTotal30d.toFixed(2)}</div>
+          </div>
+          <div className="rounded-md border border-slate-800 bg-slate-900/60 p-4">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Avg cost / call</div>
+            <div className="font-mono-data text-2xl font-semibold text-slate-100">${aiCosts.length ? (aiTotal30d / aiCosts.length).toFixed(4) : '0.0000'}</div>
+          </div>
+        </div>
+        {aiByModule.length > 0 && (
+          <div className="mt-4">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Top modules by cost</div>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={aiByModule} layout="vertical" margin={{ left: 20, right: 10 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                <XAxis type="number" stroke="#64748b" tickFormatter={(v) => `$${v}`} />
+                <YAxis dataKey="module" type="category" stroke="#64748b" width={160} tick={{ fontSize: 11 }} />
+                <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: 4 }} formatter={(v) => [`$${Number(v).toFixed(4)}`, 'cost']} />
+                <Bar dataKey="cost" fill="#34d399" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </SectionPanel>
+
+      <div className="my-4" />
 
       {loading ? <SectionPanel>Loading…</SectionPanel> : allocations.length === 0 ? (
         <SectionPanel><div className="flex flex-col items-center py-16"><DollarSign className="h-12 w-12 text-slate-600 mb-3" /><p className="text-sm text-slate-400">Create budget allocations to start tracking spend.</p></div></SectionPanel>

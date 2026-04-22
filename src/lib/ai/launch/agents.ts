@@ -3,9 +3,10 @@
 // Director reviews → Analytics proposes experiments.
 
 import { generateObject } from 'ai'
-import { modelFor } from '@/lib/ai/models'
+import { modelFor, modelLabel } from '@/lib/ai/models'
 import { z } from 'zod'
 import type { LaunchContext } from './generators'
+import { trackGen, type TrackOpts } from './utils'
 
 const STRATEGIC = () => modelFor('strategic')
 
@@ -24,7 +25,8 @@ export const StrategicBriefSchema = z.object({
 })
 export type StrategicBrief = z.infer<typeof StrategicBriefSchema>
 
-export async function cmoStrategist(ctx: LaunchContext): Promise<StrategicBrief> {
+export async function cmoStrategist(ctx: LaunchContext, track?: TrackOpts): Promise<StrategicBrief> {
+  const startedAt = Date.now()
   const res = await generateObject({
     model: STRATEGIC(),
     schema: StrategicBriefSchema,
@@ -39,6 +41,7 @@ PRICING: ${ctx.pricing}
 
 Produce the strategic brief for a 30-day launch.` }],
   })
+  await trackGen(track, 'launch_cmo', modelLabel('strategic'), res.usage, startedAt)
   return res.object
 }
 
@@ -61,7 +64,8 @@ export const SeoPlanSchema = z.object({
 })
 export type SeoPlan = z.infer<typeof SeoPlanSchema>
 
-export async function seoSpecialist(ctx: LaunchContext, brief: StrategicBrief): Promise<SeoPlan> {
+export async function seoSpecialist(ctx: LaunchContext, brief: StrategicBrief, track?: TrackOpts): Promise<SeoPlan> {
+  const startedAt = Date.now()
   const res = await generateObject({
     model: STRATEGIC(),
     schema: SeoPlanSchema,
@@ -76,6 +80,7 @@ AUDIENCE: ${ctx.audience}
 
 Produce the SEO plan. Keywords should map to the brief's themes and audience search behavior.` }],
   })
+  await trackGen(track, 'launch_seo', modelLabel('strategic'), res.usage, startedAt)
   return res.object
 }
 
@@ -99,7 +104,9 @@ export async function directorReview(
   brief: StrategicBrief,
   seo: SeoPlan,
   channelSummaries: Record<string, string>,
+  track?: TrackOpts,
 ): Promise<DirectorReview> {
+  const startedAt = Date.now()
   const res = await generateObject({
     model: STRATEGIC(),
     schema: DirectorReviewSchema,
@@ -114,6 +121,7 @@ ${Object.entries(channelSummaries).map(([k, v]) => `\n— ${k.toUpperCase()} —
 
 Review the campaign for consistency, gaps, strongest/weakest asset, and flag risks. Then give the founder the 3 highest-leverage actions for the next 48 hours.` }],
   })
+  await trackGen(track, 'launch_director', modelLabel('strategic'), res.usage, startedAt)
   return res.object
 }
 
@@ -138,7 +146,8 @@ export const AnalyticsPlanSchema = z.object({
 })
 export type AnalyticsPlan = z.infer<typeof AnalyticsPlanSchema>
 
-export async function analyticsAgent(ctx: LaunchContext, brief: StrategicBrief): Promise<AnalyticsPlan> {
+export async function analyticsAgent(ctx: LaunchContext, brief: StrategicBrief, track?: TrackOpts): Promise<AnalyticsPlan> {
+  const startedAt = Date.now()
   const res = await generateObject({
     model: STRATEGIC(),
     schema: AnalyticsPlanSchema,
@@ -149,5 +158,6 @@ THEMES: ${brief.top_3_themes.join(' | ')}
 
 Produce the analytics plan.` }],
   })
+  await trackGen(track, 'launch_analytics', modelLabel('strategic'), res.usage, startedAt)
   return res.object
 }

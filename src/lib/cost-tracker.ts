@@ -30,11 +30,13 @@ export async function trackAICost(entry: CostEntry) {
   })
 }
 
-// Rough cost estimates per 1M tokens (input/output)
+// Rough cost estimates per 1M tokens (input/output), USD
 const MODEL_COSTS: Record<string, { input: number; output: number }> = {
   'google/gemini-2.0-flash-001': { input: 0.075, output: 0.30 },
   'google/gemini-2.5-flash-preview': { input: 0.15, output: 0.60 },
+  'google/gemini-3.1-flash-image-preview': { input: 0, output: 0 }, // billed per image, not per token
   'anthropic/claude-sonnet-4': { input: 3.0, output: 15.0 },
+  'claude-sonnet-4-5-20250929': { input: 3.0, output: 15.0 },
   'openai/gpt-4o-mini': { input: 0.15, output: 0.60 },
 }
 
@@ -45,4 +47,32 @@ export function estimateCost(
 ): number {
   const costs = MODEL_COSTS[model] ?? { input: 0.5, output: 1.5 }
   return (inputTokens * costs.input + outputTokens * costs.output) / 1_000_000
+}
+
+/** Track AI cost from a Vercel AI SDK v6 usage object (has inputTokens / outputTokens). */
+export async function trackFromUsage(params: {
+  userId: string
+  projectId?: string
+  module: string
+  model: string
+  usage: { inputTokens?: number; outputTokens?: number } | undefined
+  latencyMs?: number
+  stepName?: string
+  metadata?: Record<string, unknown>
+}) {
+  const inputTokens = params.usage?.inputTokens ?? 0
+  const outputTokens = params.usage?.outputTokens ?? 0
+  const costUsd = estimateCost(params.model, inputTokens, outputTokens)
+  await trackAICost({
+    userId: params.userId,
+    projectId: params.projectId,
+    module: params.module,
+    stepName: params.stepName,
+    model: params.model,
+    inputTokens,
+    outputTokens,
+    latencyMs: params.latencyMs,
+    costUsd,
+    metadata: params.metadata,
+  })
 }

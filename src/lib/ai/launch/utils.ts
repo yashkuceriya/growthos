@@ -1,6 +1,30 @@
 import { generateAdImage } from '@/lib/ai/ad-studio/image-generator'
-import { trackAICost } from '@/lib/cost-tracker'
+import { trackAICost, trackFromUsage } from '@/lib/cost-tracker'
 import type { LaunchContext } from './generators'
+
+export interface TrackOpts {
+  userId: string
+  projectId: string
+}
+
+/** Track a generateObject result's token usage against a module. Safe no-op if track undefined. */
+export async function trackGen(
+  track: TrackOpts | undefined,
+  module: string,
+  model: string,
+  usage: { inputTokens?: number; outputTokens?: number } | undefined,
+  startedAt: number,
+) {
+  if (!track) return
+  await trackFromUsage({
+    userId: track.userId,
+    projectId: track.projectId,
+    module,
+    model,
+    usage,
+    latencyMs: Date.now() - startedAt,
+  })
+}
 
 export async function withRetries<T>(
   fn: () => Promise<T>,

@@ -11,6 +11,7 @@ import { StatusPill } from '@/components/ui/status-pill'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Plus, Megaphone } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import Link from 'next/link'
 
 interface Campaign {
   id: string
@@ -163,7 +164,7 @@ export default function CampaignsPage() {
               {filtered.map((c) => (
                 <tr key={c.id} className="hover:bg-slate-800/40">
                   <td className="px-4 py-2.5">
-                    <div className="font-semibold text-slate-100">{c.name}</div>
+                    <Link href={`/campaigns/${c.id}`} className="font-semibold text-slate-100 hover:text-emerald-300">{c.name}</Link>
                     {c.description && <div className="text-xs text-slate-500 truncate max-w-xs">{c.description}</div>}
                   </td>
                   <td className="px-4 py-2.5"><StatusPill status={c.status}>{c.status}</StatusPill></td>
