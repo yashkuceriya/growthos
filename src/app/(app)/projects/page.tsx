@@ -9,7 +9,7 @@ import { PageHeader } from '@/components/ui/page-header'
 import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { Plus, Folder, Globe, Trash2 } from 'lucide-react'
+import { Plus, Folder, Globe, Trash2, RefreshCw, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export default function ProjectsPage() {
@@ -19,7 +19,26 @@ export default function ProjectsPage() {
   const [description, setDescription] = useState('')
   const [website, setWebsite] = useState('')
   const [creating, setCreating] = useState(false)
+  const [syncingId, setSyncingId] = useState<string | null>(null)
   const supabase = createClient()
+
+  async function handleSync(id: string, url: string | null) {
+    if (!url) { toast.error('Project has no website URL'); return }
+    setSyncingId(id)
+    try {
+      const res = await fetch('/api/projects/ingest', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: id, url }),
+      })
+      if (!res.ok) throw new Error((await res.json()).error || 'Sync failed')
+      const { brand } = await res.json()
+      toast.success(`Synced: ${brand.tagline?.slice(0, 60) ?? 'Brand info saved'}`)
+      await refetch()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Sync failed')
+    }
+    setSyncingId(null)
+  }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
@@ -115,6 +134,14 @@ export default function ProjectsPage() {
                       Set Active
                     </button>
                   )}
+                  <button
+                    onClick={() => handleSync(p.id, p.website)}
+                    disabled={syncingId === p.id || !p.website}
+                    className="inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-800/60 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+                  >
+                    {syncingId === p.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                    Sync Site
+                  </button>
                 </div>
               </div>
             )
