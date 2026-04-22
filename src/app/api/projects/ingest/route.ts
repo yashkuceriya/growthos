@@ -4,6 +4,7 @@ import { generateObject } from 'ai'
 import { z } from 'zod'
 import { trackAICost, estimateCost } from '@/lib/cost-tracker'
 import { classifyProduct } from '@/lib/ai/intelligence/classifier'
+import { mergeBrandVoice } from '@/lib/brand-voice'
 
 const BrandSchema = z.object({
   tagline: z.string().describe('Primary tagline or H1 headline from the page'),
@@ -78,10 +79,8 @@ ${trimmed}`,
     ingested_at: new Date().toISOString(),
   }
 
-  // Save to project.brand_voice (merging; keep any manual edits)
-  const { data: existing } = await supabase.from('projects').select('name, description, brand_voice').eq('id', projectId).single()
-  const existingVoice = typeof existing?.brand_voice === 'object' && existing?.brand_voice !== null ? existing.brand_voice : {}
-  const merged = { ...existingVoice, ...normalized }
+  // Save to project.brand_voice — atomic merge preserves any concurrent agency writes
+  const { data: existing } = await supabase.from('projects').select('name, description').eq('id', projectId).single()
 
   // Classify product — auto-detect vertical/model/stage/compliance
   let classification = null
@@ -93,12 +92,17 @@ ${trimmed}`,
       brandVoice: normalized,
       html: trimmed,
     })
-    ;(merged as Record<string, unknown>).classification = classification
   } catch (e) {
     console.error('[ingest] classifier failed:', e)
   }
 
-  await supabase.from('projects').update({ brand_voice: merged, website: url }).eq('id', projectId)
+  const patch: Record<string, unknown> = { ...normalized }
+  if (classification) patch.classification = classification
+
+  await mergeBrandVoice(supabase, projectId, patch)
+  await supabase.from('projects').update({ website: url }).eq('id', projectId)
+
+  const merged = patch
 
   // Cost tracking
   await trackAICost({

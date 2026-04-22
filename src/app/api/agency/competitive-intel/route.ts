@@ -3,6 +3,7 @@ import { generateObject } from 'ai'
 import { modelFor } from '@/lib/ai/models'
 import { z } from 'zod'
 import { trackAICost } from '@/lib/cost-tracker'
+import { mergeBrandVoice } from '@/lib/brand-voice'
 
 const CompetitiveIntelSchema = z.object({
   competitors: z.array(z.object({
@@ -71,9 +72,8 @@ ${pages.map((p) => `\n=== ${p.url} ===\n${p.html}`).join('\n')}
 Produce a competitive intelligence report that helps me pick the positioning gap to own.` }],
   })
 
-  // Save to project
-  const merged = { ...bv, competitive_intel: res.object, intel_generated_at: new Date().toISOString() }
-  await supabase.from('projects').update({ brand_voice: merged }).eq('id', projectId)
+  // Atomic shallow merge via RPC
+  await mergeBrandVoice(supabase, projectId, { competitive_intel: res.object, intel_generated_at: new Date().toISOString() })
 
   await trackAICost({
     userId: user.id, projectId, module: 'agency_intel',

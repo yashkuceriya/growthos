@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { generateBrandGuidelines } from '@/lib/ai/agency/brand-hub'
 import { trackAICost } from '@/lib/cost-tracker'
 import type { LaunchContext } from '@/lib/ai/launch/generators'
+import { mergeBrandVoice } from '@/lib/brand-voice'
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -35,9 +36,8 @@ export async function POST(request: Request) {
   const startedAt = Date.now()
   const guidelines = await generateBrandGuidelines(ctx)
 
-  // Merge into brand_voice JSONB under `guidelines` key
-  const merged = { ...bv, guidelines, guidelines_generated_at: new Date().toISOString() }
-  await supabase.from('projects').update({ brand_voice: merged }).eq('id', projectId)
+  // Atomic shallow merge via RPC — concurrent agency writes won't clobber each other
+  await mergeBrandVoice(supabase, projectId, { guidelines, guidelines_generated_at: new Date().toISOString() })
 
   await trackAICost({
     userId: user.id, projectId, module: 'agency_brand',
