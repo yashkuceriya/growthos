@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useProject } from '@/hooks/use-project'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -32,6 +32,18 @@ export default function GenerateAdsPage() {
   const [goal, setGoal] = useState('Lead Generation')
   const [tone, setTone] = useState('Authority/Expert')
   const [generating, setGenerating] = useState(false)
+
+  // Auto-fill offer + audience from synced brand_voice when project changes
+  useEffect(() => {
+    if (!activeProject) return
+    const bv = (activeProject as unknown as { brand_voice?: Record<string, unknown> }).brand_voice
+    if (bv && typeof bv === 'object') {
+      if (!offer && typeof bv.value_proposition === 'string') setOffer(bv.value_proposition)
+      if (!audience && typeof bv.target_audience === 'string') setAudience(bv.target_audience)
+      if (typeof bv.tone_of_voice === 'string' && TONES.includes(bv.tone_of_voice)) setTone(bv.tone_of_voice)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProject?.id])
 
   const [pipeline, setPipeline] = useState<PipelineStep[]>([
     { key: 'generate', label: '1. Generate Content', status: 'pending', lines: [] },
@@ -71,6 +83,7 @@ export default function GenerateAdsPage() {
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
 
+      let errorMessage: string | null = null
       if (reader) {
         while (true) {
           const { done, value } = await reader.read()
@@ -82,11 +95,20 @@ export default function GenerateAdsPage() {
             if (data === '[DONE]') continue
             try {
               const parsed = JSON.parse(data)
-              if (parsed.progress) appendLine(parsed.progress)
+              if (parsed.progress) {
+                appendLine(parsed.progress)
+                if (parsed.progress.startsWith('Error:')) errorMessage = parsed.progress
+              }
               if (parsed.scores) setScores(parsed.scores)
             } catch { /* ignore */ }
           }
         }
+      }
+
+      if (errorMessage) {
+        toast.error(errorMessage, { duration: 10000 })
+        // keep user on this page so they can see the full error in the live pipeline
+        return
       }
 
       setPipeline((prev) => prev.map((s) => ({ ...s, status: 'complete' })))

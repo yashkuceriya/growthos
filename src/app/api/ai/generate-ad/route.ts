@@ -20,6 +20,15 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Missing required fields' }, { status: 400 })
   }
 
+  // Normalize goal to match DB check constraint (awareness | conversion | engagement)
+  function normalizeGoal(g: string): 'awareness' | 'conversion' | 'engagement' {
+    const s = g.toLowerCase()
+    if (s.includes('aware')) return 'awareness'
+    if (s.includes('engage')) return 'engagement'
+    return 'conversion' // default: lead gen, conversion, signup, purchase
+  }
+  const normalizedGoal = normalizeGoal(campaignGoal)
+
   // Fetch project for brand voice
   const { data: project } = await supabase
     .from('projects')
@@ -44,15 +53,24 @@ export async function POST(request: Request) {
 
   // Stream progress via SSE
   const encoder = new TextEncoder()
+  let closed = false
   const stream = new ReadableStream({
     async start(controller) {
       function sendProgress(message: string) {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ progress: message })}\n\n`))
+        if (closed) return
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ progress: message })}\n\n`))
+        } catch { closed = true }
+      }
+      function safeClose() {
+        if (closed) return
+        closed = true
+        try { controller.close() } catch { /* already closed */ }
       }
 
       try {
         // Create brief record
-        const { data: brief } = await supabase
+        const briefRes = await supabase
           .from('ad_briefs')
           .insert({
             user_id: user.id,
@@ -60,16 +78,17 @@ export async function POST(request: Request) {
             platform: platform || 'meta',
             audience_segment: audienceSegment,
             product_offer: productOffer,
-            campaign_goal: campaignGoal,
+            campaign_goal: normalizedGoal,
             tone: tone || null,
           })
           .select()
           .single()
 
+        const brief = briefRes.data
         if (!brief) {
-          sendProgress('Error: Failed to create brief')
-          controller.enqueue(encoder.encode('data: [DONE]\n\n'))
-          controller.close()
+          sendProgress(`Error: Failed to create brief — ${briefRes.error?.message ?? 'unknown'}`)
+          if (!closed) { try { controller.enqueue(encoder.encode('data: [DONE]\n\n')) } catch {} }
+          safeClose()
           return
         }
 
@@ -159,12 +178,18 @@ export async function POST(request: Request) {
         sendProgress(
           `Done! Generated ${result.iterations.length} iterations. Best score: ${result.bestIteration.evaluation.weightedAverage.toFixed(1)}/10`,
         )
-        controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+        if (!closed) {
+          try { controller.enqueue(encoder.encode('data: [DONE]\n\n')) } catch {}
+        }
       } catch (err) {
-        sendProgress(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`)
-        controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+        console.error('[generate-ad] pipeline error:', err)
+        const msg = err instanceof Error ? `${err.message}${err.stack ? '\n' + err.stack.split('\n').slice(0, 3).join('\n') : ''}` : 'Unknown error'
+        sendProgress(`Error: ${msg}`)
+        if (!closed) {
+          try { controller.enqueue(encoder.encode('data: [DONE]\n\n')) } catch {}
+        }
       } finally {
-        controller.close()
+        safeClose()
       }
     },
   })

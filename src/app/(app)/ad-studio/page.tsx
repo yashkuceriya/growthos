@@ -9,7 +9,7 @@ import { PageShell } from '@/components/ui/page-shell'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
-import { Sparkles, Plus, Image as ImageIcon, ShieldCheck, AlertTriangle, Zap } from 'lucide-react'
+import { Sparkles, Plus, Image as ImageIcon, ShieldCheck, AlertTriangle, Zap, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface AdCopy {
@@ -24,6 +24,7 @@ interface AdCopy {
   evaluation_scores: Record<string, { score: number }> | null
   weighted_average: number | null
   compliance: Record<string, unknown> | null
+  media_urls: string[] | null
   created_at: string
 }
 
@@ -35,8 +36,26 @@ export default function AdStudioPage() {
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<Tab>('review')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [generatingImages, setGeneratingImages] = useState(false)
   const router = useRouter()
   const supabase = createClient()
+
+  async function generateImages(adId: string) {
+    setGeneratingImages(true)
+    try {
+      const res = await fetch('/api/ai/generate-ad-image', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adCopyId: adId }),
+      })
+      if (!res.ok) throw new Error((await res.json()).error || 'Image generation failed')
+      const { count } = await res.json()
+      toast.success(`Generated ${count} image${count === 1 ? '' : 's'}`)
+      fetchAds()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed')
+    }
+    setGeneratingImages(false)
+  }
 
   useEffect(() => {
     if (activeProject) fetchAds()
@@ -161,21 +180,52 @@ export default function AdStudioPage() {
               {selected?.weighted_average != null && <StatusPill tone="accent"><Zap className="h-2.5 w-2.5" />AI Evaluated</StatusPill>}
             </span>}
             action={
-              selected && selected.status !== 'human_approved' && (
+              selected && (
                 <div className="flex items-center gap-2">
-                  <button onClick={() => selected && updateStatus(selected.id, 'rejected')} className="rounded-md border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-800">
-                    Discard
+                  <button
+                    onClick={() => generateImages(selected.id)}
+                    disabled={generatingImages}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50"
+                  >
+                    {generatingImages ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                    {selected.media_urls?.length ? 'Regenerate Images' : 'Generate Images'}
                   </button>
-                  <button onClick={() => selected && updateStatus(selected.id, 'human_approved')} className="rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-950 hover:bg-emerald-400">
-                    Refine
-                  </button>
+                  {selected.status !== 'human_approved' && (
+                    <>
+                      <button onClick={() => updateStatus(selected.id, 'rejected')} className="rounded-md border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-800">
+                        Discard
+                      </button>
+                      <button onClick={() => updateStatus(selected.id, 'human_approved')} className="rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-950 hover:bg-emerald-400">
+                        Approve
+                      </button>
+                    </>
+                  )}
                 </div>
               )
             }
           >
-            <div className="aspect-[16/10] w-full rounded-md bg-gradient-to-br from-emerald-950 via-slate-900 to-slate-950 flex items-center justify-center">
-              <ImageIcon className="h-12 w-12 text-slate-700" />
-            </div>
+            {selected?.media_urls && selected.media_urls.length > 0 ? (
+              <div className="space-y-3">
+                {selected.media_urls.map((url, i) => (
+                  <div key={i} className="rounded-md overflow-hidden border border-slate-800 bg-slate-950">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={url} alt={`Ad variant ${i + 1}`} className="w-full h-auto" />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="aspect-[16/10] w-full rounded-md bg-gradient-to-br from-emerald-950 via-slate-900 to-slate-950 flex flex-col items-center justify-center gap-2">
+                <ImageIcon className="h-10 w-10 text-slate-700" />
+                <p className="text-xs text-slate-500">No images yet — click Generate Images</p>
+              </div>
+            )}
+            {selected && (selected.primary_text || selected.description || selected.cta_button) && (
+              <div className="mt-3 rounded-md border border-slate-800 bg-slate-800/40 p-3 space-y-2 text-xs">
+                {selected.primary_text && <div><span className="font-semibold uppercase tracking-wider text-slate-500 text-[10px]">Body</span><p className="mt-0.5 text-slate-200">{selected.primary_text}</p></div>}
+                {selected.description && <div><span className="font-semibold uppercase tracking-wider text-slate-500 text-[10px]">Description</span><p className="mt-0.5 text-slate-300">{selected.description}</p></div>}
+                {selected.cta_button && <div><span className="font-semibold uppercase tracking-wider text-slate-500 text-[10px]">CTA</span> <StatusPill tone="accent">{selected.cta_button}</StatusPill></div>}
+              </div>
+            )}
             {selected?.evaluation_scores && (
               <div className="mt-4 grid grid-cols-5 gap-2">
                 {Object.entries(selected.evaluation_scores).slice(0, 5).map(([key, val]) => (
