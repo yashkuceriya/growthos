@@ -9,7 +9,8 @@ import { PageHeader } from '@/components/ui/page-header'
 import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { JsonView } from '@/components/ui/json-viewer'
-import { ChevronLeft, FileText, Mail, MessageSquare, Globe, Target } from 'lucide-react'
+import { ChevronLeft, FileText, Mail, MessageSquare, Globe, Target, Trophy, Archive } from 'lucide-react'
+import { toast } from 'sonner'
 
 interface Campaign {
   id: string
@@ -25,6 +26,8 @@ interface AdCopyRow {
   id: string
   headline: string | null
   primary_text: string | null
+  status: string
+  is_best: boolean
   variant_group: string | null
   variant_label: string | null
   hook_framework: string | null
@@ -50,7 +53,7 @@ export default function CampaignDetailPage() {
       setLoading(true)
       const [cRes, aRes, cpRes, lpRes, ldRes] = await Promise.all([
         supabase.from('campaigns').select('*').eq('id', params.id).single(),
-        supabase.from('ad_copies').select('id, headline, primary_text, variant_group, variant_label, hook_framework, ad_briefs!inner(platform, campaign_id)').eq('ad_briefs.campaign_id', params.id),
+        supabase.from('ad_copies').select('id, headline, primary_text, status, is_best, variant_group, variant_label, hook_framework, ad_briefs!inner(platform, campaign_id)').eq('ad_briefs.campaign_id', params.id),
         supabase.from('content_pieces').select('id, title, slug, word_count, status').eq('campaign_id', params.id),
         supabase.from('landing_pages').select('id, name, slug, published, visits').eq('campaign_id', params.id),
         supabase.from('leads').select('id, email, utm_source, utm_campaign, created_at, status').eq('campaign_id', params.id).order('created_at', { ascending: false }).limit(50),
@@ -133,7 +136,21 @@ export default function CampaignDetailPage() {
 
       {ads.length > 0 && (
         <SectionPanel title={`Ad Variants (${ads.length})`}>
-          <AdVariantGroups ads={ads} />
+          <AdVariantGroups
+            ads={ads}
+            onPromote={async (adCopyId) => {
+              const res = await fetch('/api/ad-copies/promote-winner', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ adCopyId }),
+              })
+              const json = await res.json()
+              if (!res.ok) { toast.error(json.error ?? 'Failed'); return }
+              toast.success(`Winner promoted · ${json.archived} sibling${json.archived === 1 ? '' : 's'} archived`)
+              // Optimistic refetch
+              const { data: refreshed } = await supabase.from('ad_copies').select('id, headline, primary_text, status, is_best, variant_group, variant_label, hook_framework, ad_briefs!inner(platform, campaign_id)').eq('ad_briefs.campaign_id', params.id)
+              setAds((refreshed ?? []) as unknown as AdCopyRow[])
+            }}
+          />
         </SectionPanel>
       )}
 
@@ -207,8 +224,7 @@ export default function CampaignDetailPage() {
   )
 }
 
-function AdVariantGroups({ ads }: { ads: AdCopyRow[] }) {
-  // Group by variant_group (or treat each ad without a group as its own)
+function AdVariantGroups({ ads, onPromote }: { ads: AdCopyRow[]; onPromote: (id: string) => Promise<void> }) {
   const groups = new Map<string, AdCopyRow[]>()
   for (const ad of ads) {
     const key = ad.variant_group ?? `solo:${ad.id}`
@@ -222,23 +238,52 @@ function AdVariantGroups({ ads }: { ads: AdCopyRow[] }) {
     <div className="space-y-4">
       {ordered.map((group, i) => {
         const platform = group[0]?.ad_briefs?.platform ?? '—'
+        const hasWinner = group.some((ad) => ad.is_best)
+        const groupHasVariants = group.length > 1
         return (
           <div key={group[0]?.variant_group ?? group[0]?.id ?? i}>
             <div className="mb-2 flex items-center gap-2">
               <StatusPill tone="accent">{platform}</StatusPill>
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{group.length > 1 ? `${group.length}-way split` : 'single variant'}</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{groupHasVariants ? `${group.length}-way split` : 'single variant'}</span>
+              {hasWinner && <StatusPill tone="success"><Trophy className="h-3 w-3" /> Winner picked</StatusPill>}
             </div>
             <div className={`grid gap-3 ${group.length === 1 ? 'grid-cols-1' : 'md:grid-cols-3'}`}>
-              {group.map((ad) => (
-                <div key={ad.id} className="rounded-md border border-slate-800 bg-slate-900/60 p-3">
-                  <div className="mb-2 flex items-center justify-between">
-                    <StatusPill tone="info">Variant {ad.variant_label ?? '—'}</StatusPill>
-                    {ad.hook_framework && <span className="text-[9px] font-mono-data text-slate-500">{ad.hook_framework}</span>}
+              {group.map((ad) => {
+                const archived = ad.status === 'rejected'
+                return (
+                  <div
+                    key={ad.id}
+                    className={`rounded-md border p-3 flex flex-col ${
+                      ad.is_best
+                        ? 'border-emerald-500/40 bg-emerald-500/5'
+                        : archived
+                        ? 'border-slate-800 bg-slate-900/30 opacity-60'
+                        : 'border-slate-800 bg-slate-900/60'
+                    }`}
+                  >
+                    <div className="mb-2 flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <StatusPill tone={ad.is_best ? 'success' : archived ? 'neutral' : 'info'}>
+                          Variant {ad.variant_label ?? '—'}
+                        </StatusPill>
+                        {ad.is_best && <Trophy className="h-3 w-3 text-emerald-400" />}
+                        {archived && <Archive className="h-3 w-3 text-slate-500" />}
+                      </div>
+                      {ad.hook_framework && <span className="text-[9px] font-mono-data text-slate-500">{ad.hook_framework}</span>}
+                    </div>
+                    <div className="text-sm font-semibold text-slate-100 mb-1">{ad.headline ?? '—'}</div>
+                    <div className="text-xs text-slate-400 line-clamp-5 flex-1">{ad.primary_text ?? '—'}</div>
+                    {groupHasVariants && !ad.is_best && !archived && (
+                      <button
+                        onClick={() => onPromote(ad.id)}
+                        className="mt-3 w-full rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-300 hover:bg-emerald-500/20"
+                      >
+                        <Trophy className="inline h-3 w-3 mr-1" /> Promote as winner
+                      </button>
+                    )}
                   </div>
-                  <div className="text-sm font-semibold text-slate-100 mb-1">{ad.headline ?? '—'}</div>
-                  <div className="text-xs text-slate-400 line-clamp-5">{ad.primary_text ?? '—'}</div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         )

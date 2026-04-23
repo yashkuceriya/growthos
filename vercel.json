@@ -3,6 +3,10 @@
     {
       "path": "/api/email/sequence-tick",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/email/daily-summary",
+      "schedule": "0 14 * * *"
     }
   ]
 }

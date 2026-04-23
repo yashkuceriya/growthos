@@ -11,6 +11,7 @@ import { StatusPill } from '@/components/ui/status-pill'
 import { SectionPanel } from '@/components/ui/section-panel'
 import { Sparkline } from '@/components/ui/sparkline'
 import { Plus, Zap, Upload, Sparkles, Megaphone, AlertTriangle, Users } from 'lucide-react'
+import { AllProjectsGrid } from '@/components/dashboard/all-projects-grid'
 
 interface Stats {
   activeCampaigns: number
@@ -127,6 +128,11 @@ export default function DashboardPage() {
         <StatusPill tone="success">
           <Sparkles className="h-3 w-3" /> AI Engine Active
         </StatusPill>
+      </div>
+
+      {/* All projects at a glance */}
+      <div className="mb-6">
+        <AllProjectsGrid />
       </div>
 
       {/* KPI grid */}
