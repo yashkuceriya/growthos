@@ -21,7 +21,15 @@ interface Campaign {
   created_at: string
 }
 
-interface AdCopyRow { id: string; headline: string | null; primary_text: string | null; ad_briefs: { platform: string } | null }
+interface AdCopyRow {
+  id: string
+  headline: string | null
+  primary_text: string | null
+  variant_group: string | null
+  variant_label: string | null
+  hook_framework: string | null
+  ad_briefs: { platform: string } | null
+}
 interface ContentRow { id: string; title: string; slug: string; word_count: number | null; status: string }
 interface LandingRow { id: string; name: string; slug: string; published: boolean; visits: number }
 interface LeadRow { id: string; email: string; utm_source: string | null; utm_campaign: string | null; created_at: string; status: string }
@@ -42,7 +50,7 @@ export default function CampaignDetailPage() {
       setLoading(true)
       const [cRes, aRes, cpRes, lpRes, ldRes] = await Promise.all([
         supabase.from('campaigns').select('*').eq('id', params.id).single(),
-        supabase.from('ad_copies').select('id, headline, primary_text, ad_briefs!inner(platform, campaign_id)').eq('ad_briefs.campaign_id', params.id),
+        supabase.from('ad_copies').select('id, headline, primary_text, variant_group, variant_label, hook_framework, ad_briefs!inner(platform, campaign_id)').eq('ad_briefs.campaign_id', params.id),
         supabase.from('content_pieces').select('id, title, slug, word_count, status').eq('campaign_id', params.id),
         supabase.from('landing_pages').select('id, name, slug, published, visits').eq('campaign_id', params.id),
         supabase.from('leads').select('id, email, utm_source, utm_campaign, created_at, status').eq('campaign_id', params.id).order('created_at', { ascending: false }).limit(50),
@@ -124,25 +132,8 @@ export default function CampaignDetailPage() {
       ) : null}
 
       {ads.length > 0 && (
-        <SectionPanel title={`Ad Copies (${ads.length})`} contentClassName="p-0">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-800">
-                <th className="px-4 py-2.5 text-left">Platform</th>
-                <th className="px-4 py-2.5 text-left">Headline</th>
-                <th className="px-4 py-2.5 text-left">Body</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800">
-              {ads.map((ad) => (
-                <tr key={ad.id}>
-                  <td className="px-4 py-2.5"><StatusPill tone="neutral">{ad.ad_briefs?.platform ?? '—'}</StatusPill></td>
-                  <td className="px-4 py-2.5 font-semibold text-slate-100">{ad.headline ?? '—'}</td>
-                  <td className="px-4 py-2.5 text-xs text-slate-400 truncate max-w-lg">{ad.primary_text ?? '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <SectionPanel title={`Ad Variants (${ads.length})`}>
+          <AdVariantGroups ads={ads} />
         </SectionPanel>
       )}
 
@@ -213,6 +204,46 @@ export default function CampaignDetailPage() {
       {/* Glance at the other channels that didn't get a column */}
       <MessageSection campaignId={campaign.id} />
     </PageShell>
+  )
+}
+
+function AdVariantGroups({ ads }: { ads: AdCopyRow[] }) {
+  // Group by variant_group (or treat each ad without a group as its own)
+  const groups = new Map<string, AdCopyRow[]>()
+  for (const ad of ads) {
+    const key = ad.variant_group ?? `solo:${ad.id}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(ad)
+  }
+  const ordered = Array.from(groups.values()).map((arr) =>
+    arr.slice().sort((a, b) => (a.variant_label ?? '').localeCompare(b.variant_label ?? ''))
+  )
+  return (
+    <div className="space-y-4">
+      {ordered.map((group, i) => {
+        const platform = group[0]?.ad_briefs?.platform ?? '—'
+        return (
+          <div key={group[0]?.variant_group ?? group[0]?.id ?? i}>
+            <div className="mb-2 flex items-center gap-2">
+              <StatusPill tone="accent">{platform}</StatusPill>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{group.length > 1 ? `${group.length}-way split` : 'single variant'}</span>
+            </div>
+            <div className={`grid gap-3 ${group.length === 1 ? 'grid-cols-1' : 'md:grid-cols-3'}`}>
+              {group.map((ad) => (
+                <div key={ad.id} className="rounded-md border border-slate-800 bg-slate-900/60 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <StatusPill tone="info">Variant {ad.variant_label ?? '—'}</StatusPill>
+                    {ad.hook_framework && <span className="text-[9px] font-mono-data text-slate-500">{ad.hook_framework}</span>}
+                  </div>
+                  <div className="text-sm font-semibold text-slate-100 mb-1">{ad.headline ?? '—'}</div>
+                  <div className="text-xs text-slate-400 line-clamp-5">{ad.primary_text ?? '—'}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 

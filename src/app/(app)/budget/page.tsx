@@ -28,6 +28,9 @@ export default function BudgetPage() {
   const [allocations, setAllocations] = useState<BudgetAllocation[]>([])
   const [expenses, setExpenses] = useState<BudgetExpense[]>([])
   const [aiCosts, setAiCosts] = useState<AiCostRow[]>([])
+  const [aiBudget, setAiBudget] = useState<number | null>(null)
+  const [aiBudgetDraft, setAiBudgetDraft] = useState('')
+  const [savingBudget, setSavingBudget] = useState(false)
   const [loading, setLoading] = useState(true)
 
   const [aOpen, setAOpen] = useState(false)
@@ -66,16 +69,33 @@ export default function BudgetPage() {
 
     // AI costs from ledger (last 30 days, per active project)
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
-    const aiRes = await supabase
-      .from('ai_cost_ledger')
-      .select('module, cost_usd, input_tokens, output_tokens, created_at')
-      .eq('project_id', activeProject.id)
-      .gte('created_at', thirtyDaysAgo)
-      .order('created_at', { ascending: false })
-      .limit(2000)
+    const [aiRes, projRes] = await Promise.all([
+      supabase
+        .from('ai_cost_ledger')
+        .select('module, cost_usd, input_tokens, output_tokens, created_at')
+        .eq('project_id', activeProject.id)
+        .gte('created_at', thirtyDaysAgo)
+        .order('created_at', { ascending: false })
+        .limit(2000),
+      supabase.from('projects').select('monthly_ai_budget_usd').eq('id', activeProject.id).single(),
+    ])
     setAiCosts((aiRes.data as AiCostRow[]) ?? [])
+    const cap = projRes.data?.monthly_ai_budget_usd as number | null | undefined
+    setAiBudget(cap ?? null)
+    setAiBudgetDraft(cap != null ? String(cap) : '')
 
     setLoading(false)
+  }
+
+  async function saveAiBudget(e: React.FormEvent) {
+    e.preventDefault()
+    if (!activeProject) return
+    setSavingBudget(true)
+    const value = aiBudgetDraft.trim() === '' ? null : parseFloat(aiBudgetDraft)
+    const { error } = await supabase.from('projects').update({ monthly_ai_budget_usd: value }).eq('id', activeProject.id)
+    if (error) toast.error(error.message)
+    else { toast.success(value == null ? 'Cap removed' : `Monthly cap set to $${value}`); setAiBudget(value) }
+    setSavingBudget(false)
   }
 
   const spentByAlloc = useMemo(() => {
@@ -88,6 +108,15 @@ export default function BudgetPage() {
   const totalSpent = useMemo(() => expenses.reduce((s, e) => s + (e.amount || 0), 0), [expenses])
   const remaining = totalAllocated - totalSpent
 
+  // Month-to-date spend (matches server-side project_month_ai_spend function)
+  const monthStart = useMemo(() => {
+    const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d.getTime()
+  }, [])
+  const aiTotalMtd = useMemo(() =>
+    aiCosts.filter((r) => new Date(r.created_at).getTime() >= monthStart).reduce((s, r) => s + (r.cost_usd ?? 0), 0),
+    [aiCosts, monthStart],
+  )
+  const budgetPercent = aiBudget ? Math.min(100, (aiTotalMtd / aiBudget) * 100) : 0
   const aiTotal30d = useMemo(() => aiCosts.reduce((s, r) => s + (r.cost_usd ?? 0), 0), [aiCosts])
   const aiTotal7d = useMemo(() => {
     const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
@@ -210,6 +239,47 @@ export default function BudgetPage() {
           </>
         }
       />
+
+      <SectionPanel title="Monthly AI Budget">
+        <form onSubmit={saveAiBudget} className="flex items-end gap-3 flex-wrap">
+          <div className="flex-1 min-w-[240px]">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Cap (USD / month) — blank for no cap</label>
+            <input
+              type="number" step="0.01" min="0"
+              placeholder="e.g. 50.00"
+              value={aiBudgetDraft}
+              onChange={(e) => setAiBudgetDraft(e.target.value)}
+              className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none"
+            />
+          </div>
+          <button type="submit" disabled={savingBudget} className="rounded-md bg-emerald-500 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-950 hover:bg-emerald-400 disabled:opacity-50">
+            {savingBudget ? 'Saving…' : 'Save Cap'}
+          </button>
+        </form>
+        {aiBudget != null && (
+          <div className="mt-3">
+            <div className="flex items-center justify-between mb-1 text-[11px] font-mono-data">
+              <span className="text-slate-400">${aiTotalMtd.toFixed(2)} / ${aiBudget.toFixed(2)} this month</span>
+              <span className={budgetPercent >= 100 ? 'text-rose-400' : budgetPercent >= 80 ? 'text-amber-400' : 'text-emerald-400'}>
+                {budgetPercent.toFixed(0)}%
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+              <div
+                className={
+                  budgetPercent >= 100 ? 'h-full bg-rose-500' : budgetPercent >= 80 ? 'h-full bg-amber-500' : 'h-full bg-emerald-500'
+                }
+                style={{ width: `${budgetPercent}%` }}
+              />
+            </div>
+            {budgetPercent >= 100 && (
+              <p className="mt-2 text-xs text-rose-300">Cap exceeded — expensive routes (Launch, Market Intel, Brand Hub, Lifecycle, Creative Lab, Competitive Intel) will return 402 until next month or cap raised.</p>
+            )}
+          </div>
+        )}
+      </SectionPanel>
+
+      <div className="my-4" />
 
       <SectionPanel title={`AI Spend (last 30 days) — ${aiCosts.length} calls · ${aiTotalTokens.toLocaleString()} tokens`}>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

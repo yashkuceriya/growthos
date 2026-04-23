@@ -3,7 +3,7 @@ export const maxDuration = 300
 
 import { createClient } from '@/lib/supabase/server'
 import {
-  genMetaAd, genLinkedInAssets, genTikTokAssets, genTwitterThread,
+  genMetaAdVariants, genLinkedInVariants, genTikTokAssets, genTwitterThread,
   genRedditPosts, genEmailSequence, genBlogPost, genLandingPage,
   type LaunchContext,
 } from '@/lib/ai/launch/generators'
@@ -14,6 +14,7 @@ import { getFounderVoiceContext } from '@/lib/ai/voice/founder-voice'
 import { withRetries, generateAdImagesForCopy, brandContextFromCtx, type TrackOpts } from '@/lib/ai/launch/utils'
 import { extractLaunchInsights, type LaunchInsights } from '@/lib/ai/launch/insight-extractor'
 import { mergeBrandVoice } from '@/lib/brand-voice'
+import { checkBudget, budgetExceededResponse } from '@/lib/budget-guard'
 
 // Channel ids the UI renders — must match keys below
 const ALL_CHANNELS = ['meta', 'linkedin', 'tiktok', 'twitter', 'reddit', 'email', 'blog', 'landing'] as const
@@ -34,6 +35,9 @@ export async function POST(request: Request) {
     .single()
 
   if (!project) return Response.json({ error: 'Project not found' }, { status: 404 })
+
+  const budget = await checkBudget(supabase, projectId)
+  if (!budget.ok) return budgetExceededResponse(budget)
 
   const bv = (project.brand_voice as Record<string, unknown>) ?? {}
   const ctx: LaunchContext = {
@@ -228,57 +232,66 @@ async function runChannel(
 
   switch (channel) {
     case 'meta': {
-      const ad = await withRetries(() => genMetaAd(ctx, track), 'meta')
+      const variants = await withRetries(() => genMetaAdVariants(ctx, track), 'meta')
       const { data: brief } = await supabase.from('ad_briefs').insert({
         user_id: userId, project_id: projectId, campaign_id: campaignId,
         platform: 'meta', audience_segment: ctx.audience, product_offer: ctx.valueProp,
         campaign_goal: 'conversion', tone: ctx.tone,
       }).select().single()
+      const variantGroup = crypto.randomUUID()
+      const LABELS = ['A', 'B', 'C']
       if (brief) {
-        const { data: adCopy } = await supabase.from('ad_copies').insert({
-          user_id: userId, brief_id: brief.id, iteration_number: 1,
-          primary_text: ad.primary_text, headline: ad.headline,
-          description: ad.description, cta_button: ad.cta_button,
-          status: 'evaluator_pass',
-          metadata: { launch_run: true, image_prompt: ad.image_prompt },
-        }).select().single()
-        if (adCopy) {
-          await generateAdImagesForCopy({
-            adCopyId: adCopy.id,
-            headline: ad.headline, description: ad.description, primaryText: ad.primary_text,
-            platform: 'meta', brandContext, referenceImageUrl: ctx.heroImageUrl,
-            aspects: ['1:1', '9:16', '1.91:1'],
-          }, supabase, userId, projectId).catch((e) => console.error('[launch][meta][image]', e))
+        for (const [idx, ad] of variants.entries()) {
+          const { data: adCopy } = await supabase.from('ad_copies').insert({
+            user_id: userId, brief_id: brief.id, iteration_number: 1,
+            primary_text: ad.primary_text, headline: ad.headline,
+            description: ad.description, cta_button: ad.cta_button,
+            status: 'evaluator_pass',
+            variant_group: variantGroup, variant_label: LABELS[idx], hook_framework: ad.hook_framework,
+            metadata: { launch_run: true, image_prompt: ad.image_prompt, hook_framework: ad.hook_framework },
+          }).select().single()
+          if (adCopy && idx === 0) {
+            // Image only for variant A — variants test copy, not creative. User can regen for B/C.
+            await generateAdImagesForCopy({
+              adCopyId: adCopy.id,
+              headline: ad.headline, description: ad.description, primaryText: ad.primary_text,
+              platform: 'meta', brandContext, referenceImageUrl: ctx.heroImageUrl,
+              aspects: ['1:1', '9:16', '1.91:1'],
+            }, supabase, userId, projectId).catch((e) => console.error('[launch][meta][image]', e))
+          }
         }
       }
-      return `Headline: ${ad.headline}\nBody: ${ad.primary_text}\nCTA: ${ad.cta_button}`
+      return `3 Meta variants (${variants.map((v) => v.hook_framework).join(' / ')}): ${variants.map((v) => v.headline).join(' | ')}`
     }
     case 'linkedin': {
-      const assets = await withRetries(() => genLinkedInAssets(ctx, track), 'linkedin')
+      const assets = await withRetries(() => genLinkedInVariants(ctx, track), 'linkedin')
       const { data: brief } = await supabase.from('ad_briefs').insert({
         user_id: userId, project_id: projectId, campaign_id: campaignId,
         platform: 'linkedin', audience_segment: ctx.audience,
         product_offer: ctx.valueProp, campaign_goal: 'conversion', tone: ctx.tone,
       }).select().single()
+      const variantGroup = crypto.randomUUID()
+      const LABELS = ['A', 'B', 'C']
       if (brief) {
-        const { data: adCopy } = await supabase.from('ad_copies').insert({
-          user_id: userId, brief_id: brief.id, iteration_number: 1,
-          primary_text: assets.sponsored_post.text,
-          headline: assets.sponsored_post.headline,
-          status: 'evaluator_pass',
-          metadata: { launch_run: true, image_prompt: assets.sponsored_post.image_prompt, organic_posts: assets.organic_posts },
-        }).select().single()
-        if (adCopy) {
-          await generateAdImagesForCopy({
-            adCopyId: adCopy.id,
-            headline: assets.sponsored_post.headline,
-            primaryText: assets.sponsored_post.text,
-            platform: 'linkedin', brandContext, referenceImageUrl: ctx.heroImageUrl,
-            aspects: ['1.91:1', '1:1'],
-          }, supabase, userId, projectId).catch((e) => console.error('[launch][linkedin][image]', e))
+        for (const [idx, v] of assets.variants.entries()) {
+          const { data: adCopy } = await supabase.from('ad_copies').insert({
+            user_id: userId, brief_id: brief.id, iteration_number: 1,
+            primary_text: v.text, headline: v.headline,
+            status: 'evaluator_pass',
+            variant_group: variantGroup, variant_label: LABELS[idx], hook_framework: v.hook_framework,
+            metadata: { launch_run: true, image_prompt: v.image_prompt, hook_framework: v.hook_framework, organic_posts: assets.organic_posts },
+          }).select().single()
+          if (adCopy && idx === 0) {
+            await generateAdImagesForCopy({
+              adCopyId: adCopy.id,
+              headline: v.headline, primaryText: v.text,
+              platform: 'linkedin', brandContext, referenceImageUrl: ctx.heroImageUrl,
+              aspects: ['1.91:1', '1:1'],
+            }, supabase, userId, projectId).catch((e) => console.error('[launch][linkedin][image]', e))
+          }
         }
       }
-      // Also save organic posts to social_posts
+      // Organic posts go to social_posts, unchanged
       for (const p of assets.organic_posts) {
         await supabase.from('social_posts').insert({
           user_id: userId, project_id: projectId, platform: 'linkedin',
@@ -286,7 +299,7 @@ async function runChannel(
           status: 'draft', ai_generated: true,
         })
       }
-      return `Sponsored: ${assets.sponsored_post.headline} — ${assets.sponsored_post.text}\nOrganic: ${assets.organic_posts.length} posts`
+      return `3 LinkedIn variants (${assets.variants.map((v) => v.hook_framework).join(' / ')}) + ${assets.organic_posts.length} organic posts`
     }
     case 'tiktok': {
       const { reels } = await withRetries(() => genTikTokAssets(ctx, track), 'tiktok')

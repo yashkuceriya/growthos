@@ -8,6 +8,7 @@ import { trackAICost } from '@/lib/cost-tracker'
 import { getPlaybook } from '@/lib/ai/playbooks/registry'
 import type { Vertical } from '@/lib/ai/intelligence/classifier'
 import { wrapHandler } from '@/lib/api-error'
+import { checkBudget, budgetExceededResponse } from '@/lib/budget-guard'
 
 export const maxDuration = 120
 
@@ -124,6 +125,9 @@ async function handlePost(request: Request) {
 
   const { projectId, persist } = await request.json()
   if (!projectId) return Response.json({ error: 'projectId required' }, { status: 400 })
+
+  const budget = await checkBudget(supabase, projectId)
+  if (!budget.ok) return budgetExceededResponse(budget)
 
   const { data: project } = await supabase.from('projects').select('name, description, website, brand_voice').eq('id', projectId).single()
   if (!project) return Response.json({ error: 'Not found' }, { status: 404 })

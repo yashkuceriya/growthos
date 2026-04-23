@@ -10,6 +10,35 @@ export const MetaAdSchema = z.object({
   image_prompt: z.string().describe('Prompt for image generation, optimized for Meta feed'),
 })
 
+export const HookFrameworkEnum = z.enum([
+  'stat_shock', 'micro_story', 'direct_callout', 'contrarian', 'before_after', 'question_agitate',
+])
+export type HookFramework = z.infer<typeof HookFrameworkEnum>
+
+export const MetaAdVariantsSchema = z.object({
+  variants: z.array(z.object({
+    hook_framework: HookFrameworkEnum,
+    primary_text: z.string().describe('Body copy, 125-2200 chars'),
+    headline: z.string().describe('Headline, 27-40 chars'),
+    description: z.string().describe('Supporting description, 27 chars'),
+    cta_button: z.enum(['Shop Now', 'Sign Up', 'Learn More', 'Get Offer', 'Apply Now', 'Book Now', 'Contact Us', 'Download']),
+    image_prompt: z.string().describe('Prompt for image generation, optimized for Meta feed'),
+  })).length(3).describe('Three distinct variants; each variant MUST use a different hook_framework'),
+})
+
+export const LinkedInVariantsSchema = z.object({
+  variants: z.array(z.object({
+    hook_framework: HookFrameworkEnum,
+    text: z.string().describe('Ad body, 150 chars optimal'),
+    headline: z.string().describe('70 char headline for text ad'),
+    image_prompt: z.string().describe('1200x627 landscape image prompt'),
+  })).length(3).describe('Three distinct sponsored variants; each MUST use a different hook_framework'),
+  organic_posts: z.array(z.object({
+    text: z.string().describe('1300 chars max, stat-driven professional tone'),
+    hashtags: z.array(z.string()),
+  })).length(2),
+})
+
 export const LinkedInAssetsSchema = z.object({
   sponsored_post: z.object({
     text: z.string().describe('Ad body, 150 chars optimal'),

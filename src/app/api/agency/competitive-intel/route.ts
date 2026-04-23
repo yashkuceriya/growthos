@@ -4,6 +4,7 @@ import { modelFor } from '@/lib/ai/models'
 import { z } from 'zod'
 import { trackAICost } from '@/lib/cost-tracker'
 import { mergeBrandVoice } from '@/lib/brand-voice'
+import { checkBudget, budgetExceededResponse } from '@/lib/budget-guard'
 
 const CompetitiveIntelSchema = z.object({
   competitors: z.array(z.object({
@@ -46,6 +47,9 @@ export async function POST(request: Request) {
   if (!projectId || !Array.isArray(competitorUrls) || competitorUrls.length === 0) {
     return Response.json({ error: 'projectId and competitorUrls[] required' }, { status: 400 })
   }
+
+  const budget = await checkBudget(supabase, projectId)
+  if (!budget.ok) return budgetExceededResponse(budget)
 
   const { data: project } = await supabase.from('projects').select('name, description, brand_voice').eq('id', projectId).single()
   if (!project) return Response.json({ error: 'Not found' }, { status: 404 })

@@ -3,6 +3,7 @@ import { generateBrandGuidelines } from '@/lib/ai/agency/brand-hub'
 import { trackAICost } from '@/lib/cost-tracker'
 import type { LaunchContext } from '@/lib/ai/launch/generators'
 import { mergeBrandVoice } from '@/lib/brand-voice'
+import { checkBudget, budgetExceededResponse } from '@/lib/budget-guard'
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -11,6 +12,9 @@ export async function POST(request: Request) {
 
   const { projectId } = await request.json()
   if (!projectId) return Response.json({ error: 'projectId required' }, { status: 400 })
+
+  const budget = await checkBudget(supabase, projectId)
+  if (!budget.ok) return budgetExceededResponse(budget)
 
   const { data: project } = await supabase
     .from('projects')

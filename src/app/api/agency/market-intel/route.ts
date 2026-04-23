@@ -12,6 +12,7 @@ import type { Vertical } from '@/lib/ai/intelligence/classifier'
 import { pickSubreddits } from '@/lib/ai/launch/specs'
 import { fetchSubredditTop, fetchHNTopStories, fetchRss } from '@/lib/ai/market/pullers'
 import { mergeBrandVoice } from '@/lib/brand-voice'
+import { checkBudget, budgetExceededResponse } from '@/lib/budget-guard'
 
 const SynthesisSchema = z.object({
   scanned_at: z.string(),
@@ -57,6 +58,9 @@ export async function POST(request: Request) {
 
   const { projectId, extraSubreddits, rssFeeds } = await request.json()
   if (!projectId) return Response.json({ error: 'projectId required' }, { status: 400 })
+
+  const budget = await checkBudget(supabase, projectId)
+  if (!budget.ok) return budgetExceededResponse(budget)
 
   const { data: project } = await supabase.from('projects').select('name, description, brand_voice').eq('id', projectId).single()
   if (!project) return Response.json({ error: 'Not found' }, { status: 404 })

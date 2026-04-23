@@ -6,6 +6,7 @@ import { trackGen, type TrackOpts } from './utils'
 import {
   MetaAdSchema, LinkedInAssetsSchema, TikTokAssetsSchema, TwitterThreadSchema,
   RedditPostsSchema, EmailSequenceSchema, BlogPostSchema, LandingPageSchema,
+  MetaAdVariantsSchema, LinkedInVariantsSchema,
 } from './schemas'
 
 const MODEL = MODEL_GEMINI_PRODUCTION
@@ -46,6 +47,38 @@ export async function genMetaAd(ctx: LaunchContext, track?: TrackOpts) {
     messages: [{ role: 'user', content: `${contextBlock(ctx)}\n\nGenerate a Meta ad that drives signups. Lead with a specific transformation for the audience.` }],
   })
   await trackGen(track, 'launch_meta', MODEL, res.usage, startedAt)
+  return res.object
+}
+
+export async function genMetaAdVariants(ctx: LaunchContext, track?: TrackOpts) {
+  const startedAt = Date.now()
+  const res = await generateObject({
+    model: openrouter(MODEL),
+    schema: MetaAdVariantsSchema,
+    system: `You are a Meta performance marketer writing 3 A/B variants for testing. Each variant MUST use a DIFFERENT hook_framework from this library:
+- stat_shock: Lead with a surprising statistic
+- micro_story: 1-2 sentence vignette that shows the pain or result
+- direct_callout: Name the audience specifically ("If you're a [x]...")
+- contrarian: Challenge a common belief or best-practice
+- before_after: Frame the life-changing shift
+- question_agitate: Ask a pointed question that exposes the pain
+
+Follow platform constraints strictly:\n${PLATFORM_SPECS.meta.constraints}`,
+    messages: [{ role: 'user', content: `${contextBlock(ctx)}\n\nGenerate 3 distinct Meta ad variants that all drive the same signup outcome but use three different hook_frameworks from the list. Headlines should feel completely different from each other — no shared phrases.` }],
+  })
+  await trackGen(track, 'launch_meta_variants', MODEL, res.usage, startedAt)
+  return res.object.variants
+}
+
+export async function genLinkedInVariants(ctx: LaunchContext, track?: TrackOpts) {
+  const startedAt = Date.now()
+  const res = await generateObject({
+    model: openrouter(MODEL),
+    schema: LinkedInVariantsSchema,
+    system: `You are a LinkedIn B2B marketer writing 3 A/B sponsored-post variants plus 2 organic posts. Each sponsored variant MUST use a different hook_framework: stat_shock, micro_story, direct_callout, contrarian, before_after, or question_agitate. Follow constraints strictly:\n${PLATFORM_SPECS.linkedin.constraints}`,
+    messages: [{ role: 'user', content: `${contextBlock(ctx)}\n\nGenerate 3 sponsored variants (different hook_frameworks each) + 2 organic posts. Organic posts: stat-driven professional tone, no emojis in first line.` }],
+  })
+  await trackGen(track, 'launch_linkedin_variants', MODEL, res.usage, startedAt)
   return res.object
 }
 
