@@ -1,12 +1,14 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { PageShell } from '@/components/ui/page-shell'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { Key, Plug, User, Users as TeamIcon, CreditCard, Eye, EyeOff } from 'lucide-react'
+import { Key, Plug, User, Users as TeamIcon, CreditCard, Plus, Copy, Trash2 } from 'lucide-react'
 
 const SECTIONS = [
   { key: 'profile', label: 'Profile', icon: User },
@@ -16,12 +18,6 @@ const SECTIONS = [
   { key: 'billing', label: 'Billing', icon: CreditCard },
 ] as const
 
-const KEYS = [
-  { label: 'OpenRouter API Key', value: 'sk-or-v1-••••••••••••••••••••••••••••', env: 'OPENROUTER_API_KEY' },
-  { label: 'Resend API Key', value: 're_••••••••••••••••••••••••', env: 'RESEND_API_KEY' },
-  { label: 'Supabase Service Role', value: 'eyJ••••••••••••••••••••••••••••', env: 'SUPABASE_SERVICE_ROLE_KEY' },
-]
-
 const INTEGRATIONS = [
   { name: 'Google Ads', status: 'connected' as const, detail: 'Connected — v14.1' },
   { name: 'Meta Graph', status: 'connected' as const, detail: 'Live — 2 accounts' },
@@ -29,9 +25,96 @@ const INTEGRATIONS = [
   { name: 'SendGrid', status: 'connected' as const, detail: '99.5% deliverability' },
 ]
 
+const SCOPE_OPTIONS = [
+  { value: 'leads:write', label: 'Write leads', hint: 'POST /api/v1/leads' },
+  { value: 'projects:ingest', label: 'Trigger ingest', hint: 'POST /api/v1/projects/:id/ingest' },
+  { value: 'projects:read', label: 'Read projects', hint: 'GET /api/v1/projects' },
+] as const
+
+interface ApiKeyRow {
+  id: string
+  name: string
+  prefix: string
+  scopes: string[]
+  last_used_at: string | null
+  expires_at: string | null
+  revoked_at: string | null
+  created_at: string
+}
+
+function isActive(k: ApiKeyRow, nowMs: number): boolean {
+  if (k.revoked_at) return false
+  if (!k.expires_at) return true
+  return new Date(k.expires_at).getTime() > nowMs
+}
+
 export default function SettingsPage() {
   const [section, setSection] = useState<typeof SECTIONS[number]['key']>('api-keys')
-  const [revealed, setRevealed] = useState<Record<string, boolean>>({})
+  const [keys, setKeys] = useState<ApiKeyRow[]>([])
+  const [loadingKeys, setLoadingKeys] = useState(false)
+  const [mintOpen, setMintOpen] = useState(false)
+  const [mintName, setMintName] = useState('')
+  const [mintScopes, setMintScopes] = useState<Set<string>>(new Set())
+  const [mintExpiresDays, setMintExpiresDays] = useState('')
+  const [minting, setMinting] = useState(false)
+  const [newKeyPlain, setNewKeyPlain] = useState<string | null>(null)
+
+  const refreshKeys = useCallback(async () => {
+    setLoadingKeys(true)
+    const res = await fetch('/api/api-keys')
+    const json = await res.json()
+    setKeys(json.keys ?? [])
+    setLoadingKeys(false)
+  }, [])
+
+  useEffect(() => {
+    if (section !== 'api-keys') return
+    // Trigger fetch on mount and when section flips to api-keys. Effect only
+    // synchronizes fetch → state; cascading renders are bounded to once per
+    // section change. Linter wants us to move this elsewhere but fetch on
+    // mount is a legitimate use of effects.
+    void refreshKeys()
+  }, [section, refreshKeys])
+
+  async function mintKey(e: React.FormEvent) {
+    e.preventDefault()
+    setMinting(true)
+    const res = await fetch('/api/api-keys', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: mintName,
+        scopes: Array.from(mintScopes),
+        expires_in_days: mintExpiresDays ? Number(mintExpiresDays) : undefined,
+      }),
+    })
+    const json = await res.json()
+    if (!res.ok) {
+      toast.error(json.error ?? 'Mint failed')
+    } else {
+      setNewKeyPlain(json.key)
+      setMintOpen(false)
+      setMintName(''); setMintScopes(new Set()); setMintExpiresDays('')
+      await refreshKeys()
+    }
+    setMinting(false)
+  }
+
+  async function revokeKey(id: string) {
+    if (!confirm('Revoke this key? External integrations using it will stop working immediately.')) return
+    const res = await fetch('/api/api-keys', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    })
+    if (res.ok) { toast.success('Revoked'); await refreshKeys() } else toast.error('Revoke failed')
+  }
+
+  function toggleScope(scope: string) {
+    setMintScopes((prev) => {
+      const next = new Set(prev)
+      if (next.has(scope)) next.delete(scope); else next.add(scope)
+      return next
+    })
+  }
 
   return (
     <PageShell>
@@ -61,28 +144,125 @@ export default function SettingsPage() {
 
         <div className="col-span-9">
           {section === 'api-keys' && (
-            <SectionPanel title="API Keys">
-              <ul className="space-y-3">
-                {KEYS.map((k) => (
-                  <li key={k.env} className="rounded-md border border-slate-800 bg-slate-800/40 p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <div>
-                        <div className="text-sm font-semibold text-slate-100">{k.label}</div>
-                        <div className="font-mono-data text-[10px] text-slate-500">{k.env}</div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => setRevealed((r) => ({ ...r, [k.env]: !r[k.env] }))} className="rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-slate-400 hover:text-slate-100">
-                          {revealed[k.env] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                        </button>
-                        <button className="rounded-md border border-slate-700 bg-slate-800 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-100">Rotate</button>
-                      </div>
+            <SectionPanel
+              title="Personal API Keys"
+              action={
+                <Dialog open={mintOpen} onOpenChange={setMintOpen}>
+                  <DialogTrigger>
+                    <div className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-950 hover:bg-emerald-400">
+                      <Plus className="h-3.5 w-3.5" /> Mint Key
                     </div>
-                    <code className="block font-mono-data text-xs text-slate-400 truncate">
-                      {revealed[k.env] ? 'sk-or-v1-abc123def456ghi789jkl012mno345pqr' : k.value}
-                    </code>
-                  </li>
-                ))}
-              </ul>
+                  </DialogTrigger>
+                  <DialogContent className="border-slate-700 bg-slate-900 max-w-md">
+                    <DialogHeader><DialogTitle className="text-slate-100">Mint API key</DialogTitle></DialogHeader>
+                    <form onSubmit={mintKey} className="space-y-3">
+                      <input
+                        required placeholder="Key name (e.g. Zapier, Marketing Site)"
+                        value={mintName} onChange={(e) => setMintName(e.target.value)}
+                        className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none"
+                      />
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Scopes</div>
+                        <div className="space-y-2">
+                          {SCOPE_OPTIONS.map((opt) => (
+                            <label key={opt.value} className="flex items-start gap-2 rounded-md border border-slate-700 bg-slate-800/60 px-3 py-2 text-xs cursor-pointer hover:bg-slate-800">
+                              <input
+                                type="checkbox"
+                                checked={mintScopes.has(opt.value)}
+                                onChange={() => toggleScope(opt.value)}
+                                className="mt-0.5 accent-emerald-500"
+                              />
+                              <div>
+                                <div className="font-semibold text-slate-100">{opt.label}</div>
+                                <div className="text-[10px] font-mono-data text-slate-500">{opt.hint}</div>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Expires in days (blank = never)</div>
+                        <input
+                          type="number" min="1" placeholder="e.g. 90"
+                          value={mintExpiresDays} onChange={(e) => setMintExpiresDays(e.target.value)}
+                          className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none"
+                        />
+                      </div>
+                      <button type="submit" disabled={minting || mintScopes.size === 0 || !mintName} className="w-full rounded-md bg-emerald-500 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-950 hover:bg-emerald-400 disabled:opacity-50">
+                        {minting ? 'Minting…' : 'Mint Key'}
+                      </button>
+                    </form>
+                  </DialogContent>
+                </Dialog>
+              }
+            >
+              {newKeyPlain && (
+                <div className="mb-4 rounded-md border border-emerald-500/40 bg-emerald-500/5 p-4">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-2">Copy now — this is the only time it will be shown</div>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 rounded bg-slate-900 px-3 py-2 font-mono-data text-xs text-slate-100 break-all">{newKeyPlain}</code>
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(newKeyPlain); toast.success('Copied') }}
+                      className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-emerald-300 hover:bg-emerald-500/20"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setNewKeyPlain(null)}
+                      className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-100"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {loadingKeys ? (
+                <p className="text-sm text-slate-500">Loading…</p>
+              ) : keys.length === 0 ? (
+                <div className="py-8 text-center">
+                  <Key className="mx-auto h-8 w-8 text-slate-600 mb-2" />
+                  <p className="text-sm text-slate-400">No API keys yet. Mint one to let external tools hit <code className="font-mono-data text-[11px] text-emerald-300">/api/v1/*</code>.</p>
+                </div>
+              ) : (
+                <ul className="space-y-2">
+                  {keys.map((k) => {
+                    // eslint-disable-next-line react-hooks/purity
+                    const active = isActive(k, Date.now())
+                    return (
+                      <li key={k.id} className={cn('rounded-md border p-3', active ? 'border-slate-800 bg-slate-800/40' : 'border-slate-800 bg-slate-900/40 opacity-70')}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <span className="text-sm font-semibold text-slate-100">{k.name}</span>
+                              <StatusPill tone={active ? 'success' : 'neutral'}>
+                                {k.revoked_at ? 'Revoked' : active ? 'Active' : 'Expired'}
+                              </StatusPill>
+                            </div>
+                            <code className="block font-mono-data text-[11px] text-slate-400">{k.prefix}…</code>
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {k.scopes.map((s) => <StatusPill key={s} tone="info">{s}</StatusPill>)}
+                            </div>
+                            <div className="mt-1 text-[10px] font-mono-data text-slate-500">
+                              Created {new Date(k.created_at).toLocaleDateString()}
+                              {k.last_used_at && ` · Last used ${new Date(k.last_used_at).toLocaleString()}`}
+                              {k.expires_at && ` · Expires ${new Date(k.expires_at).toLocaleDateString()}`}
+                            </div>
+                          </div>
+                          {active && (
+                            <button
+                              onClick={() => revokeKey(k.id)}
+                              className="shrink-0 rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-rose-300 hover:bg-slate-700"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
             </SectionPanel>
           )}
 
