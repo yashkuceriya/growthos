@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils'
 interface EmailTemplate { id: string; name: string; subject: string; body_html: string | null; category: string | null; created_at: string }
 interface EmailList { id: string; name: string; description: string | null; subscriber_count: number }
 interface EmailSequence { id: string; name: string; trigger_type: string; status: string }
+interface EnrollmentStats { active: number; completed: number; failed: number; cancelled: number; next_due?: string | null }
 
 type Tab = 'templates' | 'lists' | 'sequences'
 
@@ -25,6 +26,7 @@ export default function EmailPage() {
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [lists, setLists] = useState<EmailList[]>([])
   const [sequences, setSequences] = useState<EmailSequence[]>([])
+  const [enrollStats, setEnrollStats] = useState<Record<string, EnrollmentStats>>({})
   const [tab, setTab] = useState<Tab>('templates')
   const [loading, setLoading] = useState(true)
 
@@ -64,6 +66,31 @@ export default function EmailPage() {
     setTemplates((t.data as EmailTemplate[]) ?? [])
     setLists((l.data as EmailList[]) ?? [])
     setSequences((s.data as EmailSequence[]) ?? [])
+
+    // Fetch enrollment stats per sequence in one query
+    const seqIds = ((s.data as EmailSequence[]) ?? []).map((r) => r.id)
+    if (seqIds.length > 0) {
+      const { data: enrolls } = await supabase
+        .from('email_sequence_enrollments')
+        .select('sequence_id, status, next_send_at')
+        .in('sequence_id', seqIds)
+      const stats: Record<string, EnrollmentStats> = {}
+      for (const sid of seqIds) stats[sid] = { active: 0, completed: 0, failed: 0, cancelled: 0, next_due: null }
+      for (const e of (enrolls ?? []) as Array<{ sequence_id: string; status: string; next_send_at: string | null }>) {
+        const b = stats[e.sequence_id]
+        if (!b) continue
+        if (e.status === 'active') {
+          b.active += 1
+          if (e.next_send_at && (!b.next_due || e.next_send_at < b.next_due)) b.next_due = e.next_send_at
+        } else if (e.status === 'completed') b.completed += 1
+        else if (e.status === 'failed') b.failed += 1
+        else if (e.status === 'cancelled') b.cancelled += 1
+      }
+      setEnrollStats(stats)
+    } else {
+      setEnrollStats({})
+    }
+
     setLoading(false)
   }
 
@@ -287,15 +314,43 @@ export default function EmailPage() {
             <SectionPanel><div className="flex flex-col items-center py-12"><Workflow className="h-10 w-10 text-slate-600 mb-3" /><p className="text-sm text-slate-400">No sequences yet.</p></div></SectionPanel>
           ) : (
             <div className="grid grid-cols-2 gap-3">
-              {sequences.map((s) => (
-                <div key={s.id} className="rounded-md border border-slate-800 bg-slate-900/60 p-4 flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-semibold text-slate-100">{s.name}</h3>
-                    <p className="text-xs text-slate-400 mt-0.5">Trigger: <span className="font-mono-data text-slate-300">{s.trigger_type}</span></p>
+              {sequences.map((s) => {
+                const stats = enrollStats[s.id] ?? { active: 0, completed: 0, failed: 0, cancelled: 0, next_due: null }
+                const nextDue = stats.next_due ? new Date(stats.next_due) : null
+                const dueLabel = nextDue ? (nextDue.getTime() < Date.now() ? 'Firing on next tick' : `Next fire ${nextDue.toLocaleString()}`) : null
+                return (
+                  <div key={s.id} className="rounded-md border border-slate-800 bg-slate-900/60 p-4">
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-100">{s.name}</h3>
+                        <p className="text-xs text-slate-400 mt-0.5">Trigger: <span className="font-mono-data text-slate-300">{s.trigger_type}</span></p>
+                      </div>
+                      <StatusPill status={s.status}>{s.status}</StatusPill>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1.5 text-center">
+                      <div className="rounded border border-slate-800 bg-slate-800/40 p-1.5">
+                        <div className="text-[9px] font-semibold uppercase tracking-wider text-emerald-400">Active</div>
+                        <div className="font-mono-data text-sm font-semibold text-slate-100">{stats.active}</div>
+                      </div>
+                      <div className="rounded border border-slate-800 bg-slate-800/40 p-1.5">
+                        <div className="text-[9px] font-semibold uppercase tracking-wider text-slate-500">Done</div>
+                        <div className="font-mono-data text-sm font-semibold text-slate-300">{stats.completed}</div>
+                      </div>
+                      <div className="rounded border border-slate-800 bg-slate-800/40 p-1.5">
+                        <div className="text-[9px] font-semibold uppercase tracking-wider text-rose-400">Failed</div>
+                        <div className="font-mono-data text-sm font-semibold text-slate-300">{stats.failed}</div>
+                      </div>
+                      <div className="rounded border border-slate-800 bg-slate-800/40 p-1.5">
+                        <div className="text-[9px] font-semibold uppercase tracking-wider text-slate-500">Cancel</div>
+                        <div className="font-mono-data text-sm font-semibold text-slate-300">{stats.cancelled}</div>
+                      </div>
+                    </div>
+                    {dueLabel && (
+                      <p className="mt-2 text-[10px] font-mono-data text-slate-500">{dueLabel}</p>
+                    )}
                   </div>
-                  <StatusPill status={s.status}>{s.status}</StatusPill>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </>

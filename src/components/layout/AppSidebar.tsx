@@ -8,7 +8,7 @@ import { toast } from 'sonner'
 import {
   LayoutDashboard, Megaphone, Sparkles, Mail, Share2, FileText, Users,
   BarChart3, DollarSign, Settings, LogOut, Zap, HelpCircle, FolderKanban,
-  Globe, Plus, Rocket, Briefcase,
+  Globe, Plus, Rocket, Briefcase, AlertTriangle,
 } from 'lucide-react'
 import { ProjectSwitcher } from './ProjectSwitcher'
 
@@ -27,6 +27,7 @@ const primaryNav = [
   { href: '/leads/pages', label: 'Landing Pages', icon: Globe },
   { href: '/analytics', label: 'Analytics', icon: BarChart3 },
   { href: '/budget', label: 'Budget', icon: DollarSign },
+  { href: '/observability', label: 'Observability', icon: AlertTriangle },
 ]
 
 export function AppSidebar() {

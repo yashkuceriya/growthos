@@ -8,7 +8,8 @@ import { PageShell } from '@/components/ui/page-shell'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
-import { Palette, Loader2, Check, X } from 'lucide-react'
+import { Palette, Loader2, Check, X, Download } from 'lucide-react'
+import { guidelinesToMarkdown } from '@/lib/brand-book-export'
 
 export default function BrandHubPage() {
   const { activeProject } = useProject()
@@ -24,6 +25,22 @@ export default function BrandHubPage() {
   }
 
   useEffect(() => { refresh() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [activeProject?.id])
+
+  function download() {
+    if (!activeProject || !guidelines) return
+    const md = guidelinesToMarkdown(activeProject.name, guidelines)
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    const safeSlug = activeProject.slug.replace(/[^a-z0-9-]/gi, '-')
+    a.download = `${safeSlug}-brand-book.md`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    toast.success('Brand book downloaded')
+  }
 
   async function generate() {
     if (!activeProject) return
@@ -50,10 +67,17 @@ export default function BrandHubPage() {
         title="Brand Hub"
         subtitle="Voice, messaging, style guide — shared by all agents"
         actions={
-          <button onClick={generate} disabled={generating} className="inline-flex items-center gap-2 rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-950 hover:bg-emerald-400 disabled:opacity-50">
-            {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Palette className="h-3.5 w-3.5" />}
-            {guidelines ? 'Regenerate' : 'Generate'}
-          </button>
+          <div className="flex gap-2">
+            {guidelines && (
+              <button onClick={download} className="inline-flex items-center gap-2 rounded-md border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-800">
+                <Download className="h-3.5 w-3.5" /> Export .md
+              </button>
+            )}
+            <button onClick={generate} disabled={generating} className="inline-flex items-center gap-2 rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-950 hover:bg-emerald-400 disabled:opacity-50">
+              {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Palette className="h-3.5 w-3.5" />}
+              {guidelines ? 'Regenerate' : 'Generate'}
+            </button>
+          </div>
         }
       />
 
