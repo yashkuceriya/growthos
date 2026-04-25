@@ -10,13 +10,14 @@ import { PageHeader } from '@/components/ui/page-header'
 import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { Plus, Share2, Calendar, PenLine, Sparkles, Loader2, Clock, MessageCircle, Briefcase, Camera, Trash2, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Plus, Share2, Calendar, PenLine, Sparkles, Loader2, Clock, MessageCircle, Briefcase, Camera, Trash2, ChevronLeft, ChevronRight, Send, ExternalLink, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface SocialPost {
   id: string; platform: string; content: string; media_urls: string[]
   status: string; scheduled_at: string | null; published_at: string | null
   ai_generated: boolean; created_at: string
+  external_url: string | null; last_error: string | null; attempts: number
 }
 
 const ICON: Record<string, typeof MessageCircle> = { twitter: MessageCircle, linkedin: Briefcase, instagram: Camera }
@@ -43,8 +44,17 @@ export default function SocialPage() {
   const [aiGen, setAiGen] = useState(false)
 
   const [weekStart, setWeekStart] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }))
+  const [connectedPlatforms, setConnectedPlatforms] = useState<Set<string>>(new Set())
 
-  useEffect(() => { if (activeProject) fetchPosts() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [activeProject?.id])
+  useEffect(() => {
+    if (!activeProject) return
+    fetchPosts()
+    fetch(`/api/social/accounts?project_id=${activeProject.id}`)
+      .then((r) => r.json())
+      .then((j) => setConnectedPlatforms(new Set((j.accounts ?? []).map((a: { platform: string }) => a.platform))))
+      .catch(() => {})
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [activeProject?.id])
 
   async function fetchPosts() {
     if (!activeProject) return
@@ -91,6 +101,21 @@ export default function SocialPage() {
   async function deletePost(id: string) {
     const { error } = await supabase.from('social_posts').delete().eq('id', id)
     if (error) toast.error(error.message); else { toast.success('Deleted'); fetchPosts() }
+  }
+
+  const [publishingId, setPublishingId] = useState<string | null>(null)
+  async function publishNow(id: string) {
+    setPublishingId(id)
+    try {
+      const res = await fetch('/api/social/publish', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      const json = await res.json()
+      if (!res.ok) toast.error(json.error ?? 'Publish failed')
+      else { toast.success('Published'); fetchPosts() }
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Publish failed') }
+    setPublishingId(null)
   }
 
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
@@ -164,6 +189,16 @@ export default function SocialPage() {
         }
       />
 
+      {connectedPlatforms.size === 0 && (
+        <div className="mb-4 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">
+          <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          <div>
+            No social accounts connected for this project. Posts will queue but won&apos;t publish until you{' '}
+            <a href="/settings" className="underline font-semibold">connect an account</a> in Settings.
+          </div>
+        </div>
+      )}
+
       <div className="mb-4 flex rounded-md border border-slate-700 bg-slate-800/60 p-0.5 w-fit">
         <button onClick={() => setTab('calendar')} className={cn('inline-flex items-center gap-1.5 rounded px-3 py-1 text-xs font-semibold uppercase tracking-wider', tab === 'calendar' ? 'bg-emerald-500/15 text-emerald-300' : 'text-slate-400 hover:text-slate-200')}>
           <Calendar className="h-3.5 w-3.5" /> Calendar
@@ -218,11 +253,12 @@ export default function SocialPage() {
           <div className="space-y-2">
             {posts.map((p) => {
               const Icon = ICON[p.platform] ?? Share2
+              const canPublish = (p.status === 'draft' || p.status === 'scheduled' || p.status === 'failed') && p.platform !== 'instagram'
               return (
                 <div key={p.id} className="rounded-md border border-slate-800 bg-slate-900/60 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-2">
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
                         <Icon className="h-4 w-4 text-emerald-400" />
                         <StatusPill status={p.status}>{p.status}</StatusPill>
                         {p.ai_generated && <StatusPill tone="accent"><Sparkles className="h-2.5 w-2.5" />AI</StatusPill>}
@@ -231,10 +267,32 @@ export default function SocialPage() {
                             <Clock className="h-3 w-3" /> {format(new Date(p.scheduled_at), 'MMM d, HH:mm')}
                           </span>
                         )}
+                        {p.external_url && (
+                          <a href={p.external_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-400 hover:text-emerald-300">
+                            <ExternalLink className="h-3 w-3" /> View
+                          </a>
+                        )}
                       </div>
                       <p className="text-sm text-slate-300 whitespace-pre-wrap">{p.content}</p>
+                      {p.last_error && (
+                        <div className="mt-2 flex items-start gap-2 rounded border border-rose-500/30 bg-rose-500/5 px-2 py-1.5 text-[11px] text-rose-300">
+                          <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
+                          <span className="break-words">{p.last_error}{p.attempts > 0 ? ` (attempt ${p.attempts})` : ''}</span>
+                        </div>
+                      )}
                     </div>
-                    <button onClick={() => deletePost(p.id)} className="text-slate-500 hover:text-rose-400"><Trash2 className="h-4 w-4" /></button>
+                    <div className="flex items-center gap-1">
+                      {canPublish && (
+                        <button
+                          onClick={() => publishNow(p.id)}
+                          disabled={publishingId === p.id}
+                          className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50"
+                        >
+                          {publishingId === p.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <span className="flex items-center gap-1"><Send className="h-3 w-3" />Publish</span>}
+                        </button>
+                      )}
+                      <button onClick={() => deletePost(p.id)} className="text-slate-500 hover:text-rose-400"><Trash2 className="h-4 w-4" /></button>
+                    </div>
                   </div>
                 </div>
               )

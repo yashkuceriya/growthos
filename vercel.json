@@ -7,6 +7,10 @@
     {
       "path": "/api/email/daily-summary",
       "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/social/publish-tick",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

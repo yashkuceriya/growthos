@@ -8,15 +8,35 @@ import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { Key, Plug, User, Users as TeamIcon, CreditCard, Plus, Copy, Trash2 } from 'lucide-react'
+import { Key, Plug, User, Users as TeamIcon, CreditCard, Plus, Copy, Trash2, Share2, MessageCircle, Briefcase } from 'lucide-react'
+import { useProject } from '@/hooks/use-project'
 
 const SECTIONS = [
   { key: 'profile', label: 'Profile', icon: User },
   { key: 'api-keys', label: 'API Keys', icon: Key },
+  { key: 'social-accounts', label: 'Social Accounts', icon: Share2 },
   { key: 'integrations', label: 'Integrations', icon: Plug },
   { key: 'team', label: 'Team', icon: TeamIcon },
   { key: 'billing', label: 'Billing', icon: CreditCard },
 ] as const
+
+const SOCIAL_PLATFORMS = [
+  { value: 'twitter', label: 'Twitter / X', icon: MessageCircle, hint: 'OAuth 2.0 user access token with tweet.write scope' },
+  { value: 'linkedin', label: 'LinkedIn', icon: Briefcase, hint: 'Access token with w_member_social scope. external_account_id should be `urn:li:person:<id>`' },
+] as const
+
+interface SocialAccountRow {
+  id: string
+  project_id: string
+  platform: string
+  account_name: string | null
+  external_account_id: string | null
+  scopes: string[]
+  expires_at: string | null
+  last_publish_at: string | null
+  last_error: string | null
+  connected_at: string
+}
 
 const INTEGRATIONS = [
   { name: 'Google Ads', status: 'connected' as const, detail: 'Connected — v14.1' },
@@ -49,6 +69,7 @@ function isActive(k: ApiKeyRow, nowMs: number): boolean {
 }
 
 export default function SettingsPage() {
+  const { activeProject } = useProject()
   const [section, setSection] = useState<typeof SECTIONS[number]['key']>('api-keys')
   const [keys, setKeys] = useState<ApiKeyRow[]>([])
   const [loadingKeys, setLoadingKeys] = useState(false)
@@ -58,6 +79,61 @@ export default function SettingsPage() {
   const [mintExpiresDays, setMintExpiresDays] = useState('')
   const [minting, setMinting] = useState(false)
   const [newKeyPlain, setNewKeyPlain] = useState<string | null>(null)
+
+  const [socialAccounts, setSocialAccounts] = useState<SocialAccountRow[]>([])
+  const [loadingSocial, setLoadingSocial] = useState(false)
+  const [socialOpen, setSocialOpen] = useState(false)
+  const [socialPlatform, setSocialPlatform] = useState<typeof SOCIAL_PLATFORMS[number]['value']>('twitter')
+  const [socialToken, setSocialToken] = useState('')
+  const [socialAccountName, setSocialAccountName] = useState('')
+  const [socialExternalId, setSocialExternalId] = useState('')
+  const [socialSaving, setSocialSaving] = useState(false)
+
+  const refreshSocial = useCallback(async () => {
+    if (!activeProject) return
+    setLoadingSocial(true)
+    const res = await fetch(`/api/social/accounts?project_id=${activeProject.id}`)
+    const json = await res.json()
+    setSocialAccounts(json.accounts ?? [])
+    setLoadingSocial(false)
+  }, [activeProject])
+
+  useEffect(() => {
+    if (section === 'social-accounts' && activeProject) void refreshSocial()
+  }, [section, activeProject, refreshSocial])
+
+  async function connectSocial(e: React.FormEvent) {
+    e.preventDefault()
+    if (!activeProject) return
+    setSocialSaving(true)
+    const res = await fetch('/api/social/accounts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_id: activeProject.id,
+        platform: socialPlatform,
+        access_token: socialToken,
+        account_name: socialAccountName || undefined,
+        external_account_id: socialExternalId || undefined,
+      }),
+    })
+    const json = await res.json()
+    if (!res.ok) toast.error(json.error ?? 'Connect failed')
+    else {
+      toast.success(`${socialPlatform} connected`)
+      setSocialOpen(false); setSocialToken(''); setSocialAccountName(''); setSocialExternalId('')
+      await refreshSocial()
+    }
+    setSocialSaving(false)
+  }
+
+  async function disconnectSocial(id: string) {
+    if (!confirm('Disconnect this account? Scheduled posts will fail until reconnected.')) return
+    const res = await fetch('/api/social/accounts', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    })
+    if (res.ok) { toast.success('Disconnected'); await refreshSocial() } else toast.error('Disconnect failed')
+  }
 
   const refreshKeys = useCallback(async () => {
     setLoadingKeys(true)
@@ -266,6 +342,92 @@ export default function SettingsPage() {
             </SectionPanel>
           )}
 
+          {section === 'social-accounts' && (
+            <SectionPanel
+              title={`Social Accounts${activeProject ? ` · ${activeProject.name}` : ''}`}
+              action={
+                <Dialog open={socialOpen} onOpenChange={setSocialOpen}>
+                  <DialogTrigger>
+                    <div className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-950 hover:bg-emerald-400">
+                      <Plus className="h-3.5 w-3.5" /> Connect
+                    </div>
+                  </DialogTrigger>
+                  <DialogContent className="border-slate-700 bg-slate-900 max-w-lg">
+                    <DialogHeader><DialogTitle className="text-slate-100">Connect social account</DialogTitle></DialogHeader>
+                    <form onSubmit={connectSocial} className="space-y-3">
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Platform</div>
+                        <select value={socialPlatform} onChange={(e) => setSocialPlatform(e.target.value as typeof socialPlatform)} className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100">
+                          {SOCIAL_PLATFORMS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                        </select>
+                        <p className="mt-1 text-[10px] text-slate-500">{SOCIAL_PLATFORMS.find((p) => p.value === socialPlatform)?.hint}</p>
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Access token</div>
+                        <textarea required rows={3} value={socialToken} onChange={(e) => setSocialToken(e.target.value)} placeholder="Paste OAuth access token" className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-mono-data text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none resize-none" />
+                        <p className="mt-1 text-[10px] text-slate-500">Encrypted at rest with AES-256-GCM. Never displayed back.</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input value={socialAccountName} onChange={(e) => setSocialAccountName(e.target.value)} placeholder="Display name (optional)" className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none" />
+                        <input value={socialExternalId} onChange={(e) => setSocialExternalId(e.target.value)} placeholder={socialPlatform === 'linkedin' ? 'urn:li:person:xxxx' : 'X user id (optional)'} className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none" />
+                      </div>
+                      <button type="submit" disabled={socialSaving || !socialToken || !activeProject} className="w-full rounded-md bg-emerald-500 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-950 hover:bg-emerald-400 disabled:opacity-50">
+                        {socialSaving ? 'Connecting…' : 'Connect Account'}
+                      </button>
+                    </form>
+                  </DialogContent>
+                </Dialog>
+              }
+            >
+              {!activeProject ? (
+                <p className="text-sm text-slate-500">Select a project from the sidebar to manage its social accounts.</p>
+              ) : loadingSocial ? (
+                <p className="text-sm text-slate-500">Loading…</p>
+              ) : socialAccounts.length === 0 ? (
+                <div className="py-8 text-center">
+                  <Share2 className="mx-auto h-8 w-8 text-slate-600 mb-2" />
+                  <p className="text-sm text-slate-400">No accounts connected. Connect Twitter or LinkedIn to enable scheduled publishing.</p>
+                </div>
+              ) : (
+                <ul className="space-y-2">
+                  {socialAccounts.map((a) => {
+                    const Icon = SOCIAL_PLATFORMS.find((p) => p.value === a.platform)?.icon ?? Share2
+                    // eslint-disable-next-line react-hooks/purity
+                    const expired = a.expires_at && new Date(a.expires_at).getTime() < Date.now()
+                    return (
+                      <li key={a.id} className="rounded-md border border-slate-800 bg-slate-800/40 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <Icon className="h-4 w-4 text-emerald-400" />
+                              <span className="text-sm font-semibold text-slate-100">{a.account_name ?? a.platform}</span>
+                              <StatusPill tone={expired ? 'error' : a.last_error ? 'error' : 'success'}>
+                                {expired ? 'Expired' : a.last_error ? 'Error' : 'Connected'}
+                              </StatusPill>
+                            </div>
+                            {a.external_account_id && <code className="block font-mono-data text-[11px] text-slate-400">{a.external_account_id}</code>}
+                            <div className="mt-1 text-[10px] font-mono-data text-slate-500">
+                              Connected {new Date(a.connected_at).toLocaleDateString()}
+                              {a.last_publish_at && ` · Last published ${new Date(a.last_publish_at).toLocaleString()}`}
+                              {a.expires_at && ` · Expires ${new Date(a.expires_at).toLocaleDateString()}`}
+                            </div>
+                            {a.last_error && <p className="mt-1 text-[11px] text-rose-300">{a.last_error}</p>}
+                          </div>
+                          <button
+                            onClick={() => disconnectSocial(a.id)}
+                            className="shrink-0 rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-rose-300 hover:bg-slate-700"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </SectionPanel>
+          )}
+
           {section === 'integrations' && (
             <SectionPanel title="Integrations">
               <div className="grid grid-cols-2 gap-3">
@@ -287,7 +449,7 @@ export default function SettingsPage() {
             </SectionPanel>
           )}
 
-          {section !== 'api-keys' && section !== 'integrations' && (
+          {section !== 'api-keys' && section !== 'integrations' && section !== 'social-accounts' && (
             <SectionPanel title={SECTIONS.find((s) => s.key === section)?.label}>
               <p className="text-sm text-slate-500">Coming soon.</p>
             </SectionPanel>

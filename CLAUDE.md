@@ -197,10 +197,25 @@ supabase/migrations/
 - **Model fallback**: Strategic agents prefer Claude; fall back to Gemini silently if no `ANTHROPIC_API_KEY`.
 - **Founder voice is user-scoped**: lives in `founder_voice` table keyed by `user_id`, not `project_id`, so tone transfers across products.
 
+## Social publishing (Bundle I — migration 015)
+- **Token storage**: `lib/deploy/encryption.ts` AES-256-GCM (key from `SOCIAL_TOKEN_ENC_KEY`, 32 bytes hex or base64). Tokens persisted to `social_accounts.access_token_encrypted`.
+- **Publishers**: `lib/deploy/twitter.ts` posts threads via X API v2 (`POST /2/tweets`, chains via `in_reply_to_tweet_id`). `lib/deploy/linkedin.ts` posts via UGC Posts API (requires `external_account_id` set to author URN). Instagram intentionally not yet supported — Meta Graph requires container-based publishing.
+- **Dispatcher**: `lib/deploy/index.ts` `dispatchPost()` — owns the publish state machine. Status flow: `scheduled → publishing → published | failed`. Retries up to `MAX_PUBLISH_ATTEMPTS=3`; transient errors leave status=`scheduled` for next cron tick.
+- **Cron**: `/api/social/publish-tick` runs every 5 min via `vercel.json`, drains `status='scheduled' AND scheduled_at <= now()` (up to 25/tick). Auth via `CRON_SECRET`.
+- **Manual publish**: `POST /api/social/publish` `{id}` for the "Publish now" button on social page.
+- **Account CRUD**: `GET/POST/DELETE /api/social/accounts` (paste-token flow). Settings → Social Accounts section manages connected accounts per project. Upsert keyed on `(project_id, platform)`.
+- **UI**: social page shows a no-accounts-connected warning banner; per-post `Publish` button on draft/scheduled/failed; `external_url` link when published; inline error display with attempt count.
+
+### Migration 015 also fixed pre-existing bugs
+- `social_posts.metadata jsonb` was referenced by `/api/launch` but never existed in any prior migration — those `metadata: { launch_run: true }` inserts were failing silently. Added via `add column if not exists`.
+- `social_posts.status` check constraint widened to include `publishing | failed | cancelled` (was `draft | scheduled | published | failed`, missing `publishing` and `cancelled`).
+- Replaced unconditional `social_posts_scheduled` index with `social_posts_due` partial index keyed on `scheduled_at` where `status='scheduled' AND scheduled_at IS NOT NULL` so the cron's hot path stays small.
+
 ## What's NOT Done Yet
-- Social platform OAuth (publishing to Twitter/LinkedIn/Instagram) — `lib/deploy/twitter.ts` is a stub
+- Full 3-legged OAuth handshake for social accounts (v1 uses paste-token flow — user mints token in platform dev console)
+- Instagram, TikTok, Reddit publishers (no API publish yet — drafts only)
+- Token refresh (long-lived tokens only; once `expires_at` lapses we mark the account errored and require reconnect)
 - No `supabase gen types` — untyped clients
-- Email sequence step executor (auto-send on schedule/trigger)
 - CSV subscriber import UI
 - `lib/ai/{benchmarks,compliance,market,seo,tools}/` dirs exist but are mostly empty
 

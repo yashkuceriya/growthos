@@ -1,9 +1,22 @@
-// X/Twitter thread copy-to-clipboard + composer opener.
-// OAuth direct-post can come later; for now, clipboard flow cuts the friction.
+// X/Twitter publishing.
+//
+// - Browser helpers (clipboard / intent composer) cover the unauthenticated
+//   "user pastes into X.com" path, which is still useful when no OAuth token
+//   is configured.
+// - publishTweet() hits X API v2 (POST /2/tweets) using a user OAuth 2.0
+//   Bearer access token. Threads ([1/N], [2/N], ...) are posted as a chain
+//   via in_reply_to_tweet_id.
+//
+// Token acquisition is out of scope here — accounts are connected via the
+// settings page (paste-token flow for v1; full 3-legged OAuth dance later).
+
+import type { PublishResult } from './types'
 
 export function splitThreadFromContent(content: string): string[] {
-  // Our generator stores threads as "[1/N] tweet\n\n[2/N] tweet ..."
-  const parts = content.split(/\n\n+/).map((s) => s.replace(/^\[\d+\/\d+\]\s*/, '').trim()).filter(Boolean)
+  const parts = content
+    .split(/\n\n+/)
+    .map((s) => s.replace(/^\[\d+\/\d+\]\s*/, '').trim())
+    .filter(Boolean)
   return parts
 }
 
@@ -17,4 +30,63 @@ export function openXComposer(firstTweet: string) {
   const url = new URL('https://twitter.com/intent/tweet')
   url.searchParams.set('text', firstTweet)
   window.open(url.toString(), '_blank', 'noopener,noreferrer,width=600,height=500')
+}
+
+interface TweetResponse {
+  data?: { id: string; text: string }
+  errors?: Array<{ message: string; code?: number }>
+  detail?: string
+  title?: string
+}
+
+async function postTweet(
+  accessToken: string,
+  text: string,
+  inReplyTo: string | null,
+): Promise<{ id: string }> {
+  const body: Record<string, unknown> = { text }
+  if (inReplyTo) body.reply = { in_reply_to_tweet_id: inReplyTo }
+
+  const res = await fetch('https://api.twitter.com/2/tweets', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+  const json = (await res.json().catch(() => ({}))) as TweetResponse
+  if (!res.ok || !json.data) {
+    const msg = json.detail || json.title || json.errors?.[0]?.message || `HTTP ${res.status}`
+    throw new Error(`X API: ${msg}`)
+  }
+  return { id: json.data.id }
+}
+
+export async function publishTweet(
+  accessToken: string,
+  content: string,
+  externalAccountId: string | null,
+): Promise<PublishResult> {
+  const tweets = splitThreadFromContent(content)
+  if (tweets.length === 0) throw new Error('Tweet body is empty')
+
+  const ids: string[] = []
+  let replyTo: string | null = null
+  for (const text of tweets) {
+    const { id } = await postTweet(accessToken, text, replyTo)
+    ids.push(id)
+    replyTo = id
+  }
+
+  const firstId = ids[0]!
+  const url = externalAccountId
+    ? `https://x.com/i/web/status/${firstId}`
+    : `https://twitter.com/anyuser/status/${firstId}`
+
+  return {
+    externalId: firstId,
+    externalUrl: url,
+    metadata: { thread_ids: ids, count: ids.length },
+  }
 }
