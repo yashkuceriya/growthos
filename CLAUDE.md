@@ -206,6 +206,14 @@ supabase/migrations/
 - **Account CRUD**: `GET/POST/DELETE /api/social/accounts` (paste-token flow). Settings → Social Accounts section manages connected accounts per project. Upsert keyed on `(project_id, platform)`.
 - **UI**: social page shows a no-accounts-connected warning banner; per-post `Publish` button on draft/scheduled/failed; `external_url` link when published; inline error display with attempt count.
 
+## Engagement sync (Bundle J — migration 017)
+- **Cron**: `/api/social/engagement-tick` runs `*/30 * * * *`. Picks up to 50 published posts per tick where `engagement_synced_at IS NULL OR engagement_synced_at < now() - 1h`, ordered nulls-first so brand-new posts get their first sync ahead of refreshes.
+- **Pullers**: `lib/deploy/twitter-engagement.ts` calls `GET /2/tweets?ids=<csv>&tweet.fields=public_metrics,non_public_metrics`. Sums likes/replies/shares (retweet+quote)/impressions across the entire thread (`metadata.thread_ids`). `lib/deploy/linkedin-engagement.ts` calls `GET /v2/socialActions/{urn-encoded}` for likes + first-level comments. LinkedIn impressions stay `null` (need org admin + organizationalEntityShareStatistics, not in paste-token flow).
+- **Normalized shape** (`engagement-types.ts`): `{ likes, replies, shares, impressions, bookmarks?, synced_at, platform_raw }` written to `social_posts.engagement` jsonb.
+- **Manual refresh**: `POST /api/social/engagement {id}` for the social-page row-level "Refresh stats" button.
+- **UI**: published posts now show inline metrics row (heart/reply/repeat/eye icons); per-row spinner on manual refresh; sync errors surface as amber line ("stats unavailable: ...").
+- **Backoff on failure**: `engagement_synced_at` is stamped even when the puller errors, so a permanently-broken row doesn't burn cron quota every tick. The error column tells the UI why it's stale.
+
 ### Migration 015 also fixed pre-existing bugs
 - `social_posts.metadata jsonb` was referenced by `/api/launch` but never existed in any prior migration — those `metadata: { launch_run: true }` inserts were failing silently. Added via `add column if not exists`.
 - `social_posts.status` check constraint widened to include `publishing | failed | cancelled` (was `draft | scheduled | published | failed`, missing `publishing` and `cancelled`).

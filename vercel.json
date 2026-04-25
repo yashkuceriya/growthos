@@ -11,6 +11,10 @@
     {
       "path": "/api/social/publish-tick",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/social/engagement-tick",
+      "schedule": "*/30 * * * *"
     }
   ]
 }

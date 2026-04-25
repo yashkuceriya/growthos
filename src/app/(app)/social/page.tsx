@@ -10,14 +10,22 @@ import { PageHeader } from '@/components/ui/page-header'
 import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { Plus, Share2, Calendar, PenLine, Sparkles, Loader2, Clock, MessageCircle, Briefcase, Camera, Trash2, ChevronLeft, ChevronRight, Send, ExternalLink, AlertTriangle } from 'lucide-react'
+import { Plus, Share2, Calendar, PenLine, Sparkles, Loader2, Clock, MessageCircle, Briefcase, Camera, Trash2, ChevronLeft, ChevronRight, Send, ExternalLink, AlertTriangle, Heart, MessageSquare, Repeat2, Eye, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
+interface Engagement {
+  likes?: number; replies?: number; shares?: number
+  impressions?: number | null; bookmarks?: number
+  synced_at?: string
+}
 interface SocialPost {
   id: string; platform: string; content: string; media_urls: string[]
   status: string; scheduled_at: string | null; published_at: string | null
   ai_generated: boolean; created_at: string
   external_url: string | null; last_error: string | null; attempts: number
+  engagement: Engagement | null
+  engagement_synced_at: string | null
+  engagement_sync_error: string | null
 }
 
 const ICON: Record<string, typeof MessageCircle> = { twitter: MessageCircle, linkedin: Briefcase, instagram: Camera }
@@ -104,6 +112,22 @@ export default function SocialPage() {
   }
 
   const [publishingId, setPublishingId] = useState<string | null>(null)
+  const [refreshingId, setRefreshingId] = useState<string | null>(null)
+
+  async function refreshEngagement(id: string) {
+    setRefreshingId(id)
+    try {
+      const res = await fetch('/api/social/engagement', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      const json = await res.json()
+      if (!res.ok) toast.error(json.error ?? 'Refresh failed')
+      else { toast.success('Stats refreshed'); fetchPosts() }
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Refresh failed') }
+    setRefreshingId(null)
+  }
+
   async function publishNow(id: string) {
     setPublishingId(id)
     try {
@@ -274,6 +298,22 @@ export default function SocialPage() {
                         )}
                       </div>
                       <p className="text-sm text-slate-300 whitespace-pre-wrap">{p.content}</p>
+                      {p.status === 'published' && p.engagement && (
+                        <div className="mt-2 flex items-center gap-3 text-[11px] text-slate-400">
+                          <span className="flex items-center gap-1"><Heart className="h-3 w-3" /> {p.engagement.likes ?? 0}</span>
+                          <span className="flex items-center gap-1"><MessageSquare className="h-3 w-3" /> {p.engagement.replies ?? 0}</span>
+                          <span className="flex items-center gap-1"><Repeat2 className="h-3 w-3" /> {p.engagement.shares ?? 0}</span>
+                          {typeof p.engagement.impressions === 'number' && (
+                            <span className="flex items-center gap-1"><Eye className="h-3 w-3" /> {p.engagement.impressions.toLocaleString()}</span>
+                          )}
+                          {p.engagement_synced_at && (
+                            <span className="font-mono-data text-slate-600">· synced {format(new Date(p.engagement_synced_at), 'MMM d HH:mm')}</span>
+                          )}
+                        </div>
+                      )}
+                      {p.engagement_sync_error && (
+                        <p className="mt-1 text-[10px] text-amber-400">stats unavailable: {p.engagement_sync_error}</p>
+                      )}
                       {p.last_error && (
                         <div className="mt-2 flex items-start gap-2 rounded border border-rose-500/30 bg-rose-500/5 px-2 py-1.5 text-[11px] text-rose-300">
                           <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
@@ -289,6 +329,16 @@ export default function SocialPage() {
                           className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50"
                         >
                           {publishingId === p.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <span className="flex items-center gap-1"><Send className="h-3 w-3" />Publish</span>}
+                        </button>
+                      )}
+                      {p.status === 'published' && (p.platform === 'twitter' || p.platform === 'linkedin') && (
+                        <button
+                          onClick={() => refreshEngagement(p.id)}
+                          disabled={refreshingId === p.id}
+                          title="Refresh stats"
+                          className="rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-slate-400 hover:bg-slate-800/60 disabled:opacity-50"
+                        >
+                          <RefreshCw className={cn('h-3 w-3', refreshingId === p.id && 'animate-spin')} />
                         </button>
                       )}
                       <button onClick={() => deletePost(p.id)} className="text-slate-500 hover:text-rose-400"><Trash2 className="h-4 w-4" /></button>
