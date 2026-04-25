@@ -63,20 +63,51 @@ async function postTweet(
   return { id: json.data.id }
 }
 
+export class TwitterPartialThreadError extends Error {
+  partialThreadIds: string[]
+  constructor(message: string, partialThreadIds: string[]) {
+    super(message)
+    this.name = 'TwitterPartialThreadError'
+    this.partialThreadIds = partialThreadIds
+  }
+}
+
+interface PublishTweetOpts {
+  // Skip the first N tweets (already posted in a previous attempt) and resume
+  // chain replies from priorThreadIds[N-1].
+  resumeFromIndex?: number
+  priorThreadIds?: string[]
+}
+
 export async function publishTweet(
   accessToken: string,
   content: string,
   externalAccountId: string | null,
+  opts: PublishTweetOpts = {},
 ): Promise<PublishResult> {
   const tweets = splitThreadFromContent(content)
   if (tweets.length === 0) throw new Error('Tweet body is empty')
 
-  const ids: string[] = []
-  let replyTo: string | null = null
-  for (const text of tweets) {
-    const { id } = await postTweet(accessToken, text, replyTo)
-    ids.push(id)
-    replyTo = id
+  const resumeFrom = opts.resumeFromIndex ?? 0
+  const priorIds = opts.priorThreadIds ?? []
+  const ids: string[] = [...priorIds]
+  let replyTo: string | null = priorIds[priorIds.length - 1] ?? null
+
+  for (let i = resumeFrom; i < tweets.length; i++) {
+    const text = tweets[i]!
+    try {
+      const { id } = await postTweet(accessToken, text, replyTo)
+      ids.push(id)
+      replyTo = id
+    } catch (err) {
+      // Re-raise as a partial-thread error so the dispatcher can persist
+      // ids[] and resume on the next attempt instead of double-posting.
+      const msg = err instanceof Error ? err.message : 'Unknown'
+      throw new TwitterPartialThreadError(
+        `Tweet ${i + 1}/${tweets.length} failed: ${msg}`,
+        ids,
+      )
+    }
   }
 
   const firstId = ids[0]!

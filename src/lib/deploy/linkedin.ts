@@ -58,9 +58,14 @@ export async function publishLinkedInPost(
   const externalId = headerId || json.id
   if (!externalId) throw new Error('LinkedIn API: response had no post id')
 
-  // ugcPost URNs look like `urn:li:share:6993...`. Public URL uses the trailing id.
-  const numericId = externalId.split(':').pop() || externalId
-  const externalUrl = `https://www.linkedin.com/feed/update/urn:li:share:${numericId}/`
+  // ugcPost URNs look like `urn:li:share:6993...` or `urn:li:ugcPost:6993...`.
+  // Public URL needs the trailing numeric id. Don't fabricate a URL if the
+  // shape isn't what we expect — better to skip the backlink than to point
+  // somewhere broken.
+  const tail = externalId.split(':').pop() ?? ''
+  const externalUrl = /^\d+$/.test(tail)
+    ? `https://www.linkedin.com/feed/update/urn:li:share:${tail}/`
+    : null
 
   return {
     externalId,

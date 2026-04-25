@@ -4,6 +4,11 @@
 // access token, calls the platform publisher, and writes the result back to
 // the post row. Encapsulates the status state machine so callers (cron,
 // manual-publish API) only need a post id.
+//
+// Concurrency: callers may overlap (cron tick + "Publish now" button). We
+// take the row by an atomic conditional UPDATE keyed on (id, status, attempts)
+// — only one writer wins, the loser sees zero rows updated and bails. This
+// replaces the read-then-write claim that had a TOCTOU window.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { decryptToken } from './encryption'
@@ -18,16 +23,19 @@ export interface DispatchOutcome {
   externalId?: string
   externalUrl?: string | null
   error?: string
-  finalStatus: 'published' | 'failed' | 'scheduled'
+  finalStatus: 'published' | 'failed' | 'scheduled' | 'skipped'
 }
 
 interface PublishContext {
   supabase: SupabaseClient
   post: SocialPostRow
   account: SocialAccountRow
+  // Tweets that were already posted in a previous attempt (thread resume)
+  resumeFromIndex: number
+  priorThreadIds: string[]
 }
 
-async function callPublisher({ post, account }: PublishContext): Promise<PublishResult> {
+async function callPublisher({ post, account, resumeFromIndex, priorThreadIds }: PublishContext): Promise<PublishResult> {
   if (!account.access_token_encrypted) {
     throw new Error(`No access token on connected ${account.platform} account`)
   }
@@ -36,7 +44,10 @@ async function callPublisher({ post, account }: PublishContext): Promise<Publish
   switch (post.platform) {
     case 'twitter':
     case 'x':
-      return publishTweet(token, post.content, account.external_account_id)
+      return publishTweet(token, post.content, account.external_account_id, {
+        resumeFromIndex,
+        priorThreadIds,
+      })
     case 'linkedin':
       return publishLinkedInPost(token, post.content, account.external_account_id)
     case 'instagram':
@@ -62,9 +73,51 @@ async function loadAccount(
 }
 
 /**
+ * Atomically claim a post row for publishing. Returns the post in its claimed
+ * state (status='publishing', attempts incremented), or null if another writer
+ * already claimed it. The conditional UPDATE keys on (id, status, attempts) —
+ * if either field has shifted between the caller's snapshot and the write, the
+ * row is considered claimed-by-someone-else and we abort.
+ */
+async function claimPost(
+  supabase: SupabaseClient,
+  post: SocialPostRow,
+): Promise<SocialPostRow | null> {
+  const nextAttempts = post.attempts + 1
+  const { data } = await supabase
+    .from('social_posts')
+    .update({
+      status: 'publishing',
+      attempts: nextAttempts,
+      last_attempt_at: new Date().toISOString(),
+    })
+    .eq('id', post.id)
+    .eq('status', post.status)
+    .eq('attempts', post.attempts)
+    .select('*')
+    .maybeSingle()
+
+  if (!data) return null
+  return data as SocialPostRow
+}
+
+interface PostMetadata {
+  thread_ids?: string[]
+  partial_thread_ids?: string[]
+  [key: string]: unknown
+}
+
+function readPriorThreadIds(post: SocialPostRow): string[] {
+  const meta = (post as unknown as { metadata?: PostMetadata }).metadata
+  return meta?.partial_thread_ids ?? []
+}
+
+/**
  * Publish a single post. Caller has already loaded the row. Updates the row
  * (status, attempts, external_id, last_error). Idempotent on `published`:
- * if the post is already published this no-ops.
+ * if the post is already published this no-ops. Concurrency-safe: if another
+ * writer claims this row first, returns finalStatus='skipped' without
+ * touching the platform.
  */
 export async function dispatchPost(
   supabase: SupabaseClient,
@@ -74,34 +127,27 @@ export async function dispatchPost(
     return { ok: true, externalId: post.external_id, externalUrl: post.external_url, finalStatus: 'published' }
   }
 
-  // Mark in-flight so a retry-tick that fires before this one finishes
-  // doesn't double-send. Increment attempts in the same write.
-  const nextAttempts = post.attempts + 1
-  await supabase
-    .from('social_posts')
-    .update({
-      status: 'publishing',
-      attempts: nextAttempts,
-      last_attempt_at: new Date().toISOString(),
-    })
-    .eq('id', post.id)
+  const claimed = await claimPost(supabase, post)
+  if (!claimed) {
+    return { ok: false, error: 'Post already being published by another worker', finalStatus: 'skipped' }
+  }
 
-  const account = await loadAccount(supabase, post.project_id, post.platform)
+  const account = await loadAccount(supabase, claimed.project_id, claimed.platform)
   if (!account) {
-    const msg = `No connected ${post.platform} account for this project`
+    const msg = `No connected ${claimed.platform} account for this project`
     await supabase
       .from('social_posts')
       .update({ status: 'failed', last_error: msg })
-      .eq('id', post.id)
+      .eq('id', claimed.id)
     return { ok: false, error: msg, finalStatus: 'failed' }
   }
 
   if (account.expires_at && new Date(account.expires_at).getTime() < Date.now()) {
-    const msg = `${post.platform} access token expired — reconnect the account`
+    const msg = `${claimed.platform} access token expired — reconnect the account`
     await supabase
       .from('social_posts')
       .update({ status: 'failed', last_error: msg })
-      .eq('id', post.id)
+      .eq('id', claimed.id)
     await supabase
       .from('social_accounts')
       .update({ last_error: msg })
@@ -109,8 +155,16 @@ export async function dispatchPost(
     return { ok: false, error: msg, finalStatus: 'failed' }
   }
 
+  const priorThreadIds = readPriorThreadIds(claimed)
+
   try {
-    const result = await callPublisher({ supabase, post: { ...post, attempts: nextAttempts }, account })
+    const result = await callPublisher({
+      supabase,
+      post: claimed,
+      account,
+      resumeFromIndex: priorThreadIds.length,
+      priorThreadIds,
+    })
     await supabase
       .from('social_posts')
       .update({
@@ -121,7 +175,7 @@ export async function dispatchPost(
         last_error: null,
         metadata: result.metadata,
       })
-      .eq('id', post.id)
+      .eq('id', claimed.id)
     await supabase
       .from('social_accounts')
       .update({ last_publish_at: new Date().toISOString(), last_error: null })
@@ -133,15 +187,22 @@ export async function dispatchPost(
       finalStatus: 'published',
     }
   } catch (err) {
+    // For Twitter threads, the publisher attaches partial_thread_ids to the
+    // error so we can resume on the next attempt instead of duplicating.
+    const partialIds = (err as { partialThreadIds?: string[] })?.partialThreadIds ?? []
     const msg = err instanceof Error ? err.message : 'Unknown publish error'
-    const giveUp = nextAttempts >= MAX_PUBLISH_ATTEMPTS
-    await supabase
-      .from('social_posts')
-      .update({
-        status: giveUp ? 'failed' : 'scheduled',
-        last_error: msg,
-      })
-      .eq('id', post.id)
+    const giveUp = claimed.attempts >= MAX_PUBLISH_ATTEMPTS
+
+    const update: Record<string, unknown> = {
+      status: giveUp ? 'failed' : 'scheduled',
+      last_error: msg,
+    }
+    if (partialIds.length > 0) {
+      // Persist what we got out so the next dispatch picks up where we stopped.
+      update.metadata = { partial_thread_ids: partialIds }
+    }
+
+    await supabase.from('social_posts').update(update).eq('id', claimed.id)
     return { ok: false, error: msg, finalStatus: giveUp ? 'failed' : 'scheduled' }
   }
 }
