@@ -36,4 +36,7 @@ export interface SocialPostRow {
   engagement?: Record<string, unknown> | null
   engagement_synced_at?: string | null
   engagement_sync_error?: string | null
+  is_winner?: boolean
+  winner_score?: number | null
+  winner_promoted_at?: string | null
 }

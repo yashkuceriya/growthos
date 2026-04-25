@@ -25,6 +25,10 @@ interface GenerateSocialParams {
   tone?: string
   brandVoice?: string
   contentType?: 'educational' | 'promotional' | 'engaging' | 'announcement' | 'behind_the_scenes'
+  // Pre-formatted block from getFounderVoiceContext() — founder voice samples
+  // and promoted-winner style references for this platform. Injected into the
+  // system prompt so winning patterns carry forward.
+  styleContext?: string
 }
 
 export async function generateSocialPost(params: GenerateSocialParams): Promise<{
@@ -46,7 +50,7 @@ RULES:
 - ${params.platform === 'linkedin' ? 'Use line breaks for readability. Start with a hook line. End with a question to drive engagement.' : ''}
 - ${params.platform === 'instagram' ? 'Lead with a strong hook. Use emojis sparingly (2-3). End with a CTA.' : ''}
 - Do NOT include hashtags in the content field — put them in the hashtags array
-${params.brandVoice ? `\nBRAND VOICE: ${params.brandVoice}` : ''}`
+${params.brandVoice ? `\nBRAND VOICE: ${params.brandVoice}` : ''}${params.styleContext ? `\n\n${params.styleContext}` : ''}`
 
   const userMessage = `Create a ${params.contentType || 'engaging'} ${params.platform} post.
 

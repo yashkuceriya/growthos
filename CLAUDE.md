@@ -214,6 +214,13 @@ supabase/migrations/
 - **UI**: published posts now show inline metrics row (heart/reply/repeat/eye icons); per-row spinner on manual refresh; sync errors surface as amber line ("stats unavailable: ...").
 - **Backoff on failure**: `engagement_synced_at` is stamped even when the puller errors, so a permanently-broken row doesn't burn cron quota every tick. The error column tells the UI why it's stale.
 
+## Winner detection + auto-promote (Bundle K — migration 018)
+- **Scorer** (`lib/ai/social/winner.ts`): `score = (likes + 3*replies + 5*shares)`; if impressions present, blend with `weighted/impressions * 100 + weighted * 0.1` so high-rate posts beat high-volume-low-engagement ones. Returns 0 for unpublished or no-engagement posts.
+- **Selector**: `selectWinners(posts)` picks top 3 per platform over a 30-day window with `minScore=5`, returns `{winners, demote}`. Demote = posts currently flagged `is_winner=true` that no longer qualify.
+- **Cron**: `/api/social/winner-tick` runs `0 */6 * * *`. For each project, scores recent posts, marks new winners, demotes fallen ones, and **mirrors winners into `style_references`** (`asset_kind = '<platform>_post'`, `metric_proof = JSON of engagement, why_good = brief rationale`). Idempotent via `style_references.source_post_id` partial-unique index.
+- **Manual override**: `POST/DELETE /api/social/winner {id}` for the social-page Trophy button. Demote also deletes the matching style_reference.
+- **Style refs flow into generation**: `/api/ai/generate-social` now calls `getFounderVoiceContext(userId, '<platform>_post')` and injects "PROVEN STYLE REFERENCES" into the system prompt — winners feed back into future drafts. The voice loader was already wired, just unfed until now.
+
 ### Migration 015 also fixed pre-existing bugs
 - `social_posts.metadata jsonb` was referenced by `/api/launch` but never existed in any prior migration — those `metadata: { launch_run: true }` inserts were failing silently. Added via `add column if not exists`.
 - `social_posts.status` check constraint widened to include `publishing | failed | cancelled` (was `draft | scheduled | published | failed`, missing `publishing` and `cancelled`).

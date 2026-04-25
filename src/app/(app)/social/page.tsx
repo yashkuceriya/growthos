@@ -10,7 +10,7 @@ import { PageHeader } from '@/components/ui/page-header'
 import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { Plus, Share2, Calendar, PenLine, Sparkles, Loader2, Clock, MessageCircle, Briefcase, Camera, Trash2, ChevronLeft, ChevronRight, Send, ExternalLink, AlertTriangle, Heart, MessageSquare, Repeat2, Eye, RefreshCw } from 'lucide-react'
+import { Plus, Share2, Calendar, PenLine, Sparkles, Loader2, Clock, MessageCircle, Briefcase, Camera, Trash2, ChevronLeft, ChevronRight, Send, ExternalLink, AlertTriangle, Heart, MessageSquare, Repeat2, Eye, RefreshCw, Trophy } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface Engagement {
@@ -26,6 +26,8 @@ interface SocialPost {
   engagement: Engagement | null
   engagement_synced_at: string | null
   engagement_sync_error: string | null
+  is_winner: boolean
+  winner_score: number | null
 }
 
 const ICON: Record<string, typeof MessageCircle> = { twitter: MessageCircle, linkedin: Briefcase, instagram: Camera }
@@ -113,6 +115,22 @@ export default function SocialPage() {
 
   const [publishingId, setPublishingId] = useState<string | null>(null)
   const [refreshingId, setRefreshingId] = useState<string | null>(null)
+  const [winnerBusyId, setWinnerBusyId] = useState<string | null>(null)
+
+  async function toggleWinner(id: string, currentlyWinner: boolean) {
+    setWinnerBusyId(id)
+    try {
+      const res = await fetch('/api/social/winner', {
+        method: currentlyWinner ? 'DELETE' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) toast.error(json.error ?? 'Update failed')
+      else { toast.success(currentlyWinner ? 'Demoted' : 'Promoted to style reference'); fetchPosts() }
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Update failed') }
+    setWinnerBusyId(null)
+  }
 
   async function refreshEngagement(id: string) {
     setRefreshingId(id)
@@ -286,6 +304,11 @@ export default function SocialPage() {
                         <Icon className="h-4 w-4 text-emerald-400" />
                         <StatusPill status={p.status}>{p.status}</StatusPill>
                         {p.ai_generated && <StatusPill tone="accent"><Sparkles className="h-2.5 w-2.5" />AI</StatusPill>}
+                        {p.is_winner && (
+                          <StatusPill tone="success">
+                            <Trophy className="h-2.5 w-2.5" /> Top performer
+                          </StatusPill>
+                        )}
                         {p.scheduled_at && (
                           <span className="flex items-center gap-1 font-mono-data text-[10px] text-slate-500">
                             <Clock className="h-3 w-3" /> {format(new Date(p.scheduled_at), 'MMM d, HH:mm')}
@@ -339,6 +362,21 @@ export default function SocialPage() {
                           className="rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-slate-400 hover:bg-slate-800/60 disabled:opacity-50"
                         >
                           <RefreshCw className={cn('h-3 w-3', refreshingId === p.id && 'animate-spin')} />
+                        </button>
+                      )}
+                      {p.status === 'published' && (
+                        <button
+                          onClick={() => toggleWinner(p.id, p.is_winner)}
+                          disabled={winnerBusyId === p.id}
+                          title={p.is_winner ? 'Remove from style references' : 'Promote to style references'}
+                          className={cn(
+                            'rounded-md border px-2 py-1 disabled:opacity-50',
+                            p.is_winner
+                              ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
+                              : 'border-slate-700 bg-slate-800 text-slate-400 hover:bg-slate-800/60',
+                          )}
+                        >
+                          <Trophy className="h-3 w-3" />
                         </button>
                       )}
                       <button onClick={() => deletePost(p.id)} className="text-slate-500 hover:text-rose-400"><Trash2 className="h-4 w-4" /></button>
