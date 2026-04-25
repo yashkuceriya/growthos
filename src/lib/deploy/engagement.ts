@@ -15,8 +15,32 @@ export interface SyncOutcome {
   error?: string
 }
 
-interface PostWithMetadata extends SocialPostRow {
-  metadata?: { thread_ids?: string[]; partial_thread_ids?: string[] } | null
+/**
+ * Merge a freshly-pulled engagement reading with whatever was already on the
+ * row. Engagement counters (likes, replies, shares, bookmarks) are monotonic
+ * on the platform side — they never go down for a live post. So we take the
+ * max defensively: if a permission change or transient API quirk returns 0
+ * for a field, we don't clobber the prior good number. Impressions specifically
+ * can be `null` (LinkedIn never returns it; X requires special scope) — we
+ * prefer the most informative reading (non-null over null).
+ */
+export function mergeEngagement(
+  prev: Record<string, unknown> | null | undefined,
+  fresh: NormalizedEngagement,
+): NormalizedEngagement {
+  const p = (prev ?? {}) as Partial<NormalizedEngagement>
+  const max = (a: number | undefined, b: number) => Math.max(a ?? 0, b)
+  return {
+    likes: max(p.likes, fresh.likes),
+    replies: max(p.replies, fresh.replies),
+    shares: max(p.shares, fresh.shares),
+    bookmarks: typeof fresh.bookmarks === 'number' || typeof p.bookmarks === 'number'
+      ? max(p.bookmarks, fresh.bookmarks ?? 0)
+      : undefined,
+    impressions: fresh.impressions ?? p.impressions ?? null,
+    synced_at: fresh.synced_at,
+    platform_raw: fresh.platform_raw,
+  }
 }
 
 async function loadAccount(
@@ -35,7 +59,7 @@ async function loadAccount(
 
 async function callPuller(
   account: SocialAccountRow,
-  post: PostWithMetadata,
+  post: SocialPostRow,
 ): Promise<NormalizedEngagement> {
   if (!account.access_token_encrypted) {
     throw new Error(`No access token on connected ${account.platform} account`)
@@ -78,7 +102,8 @@ export async function syncPostEngagement(
   }
 
   try {
-    const engagement = await callPuller(account, post as PostWithMetadata)
+    const fresh = await callPuller(account, post)
+    const engagement = mergeEngagement(post.engagement, fresh)
     await supabase
       .from('social_posts')
       .update({

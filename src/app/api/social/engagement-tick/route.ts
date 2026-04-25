@@ -24,18 +24,35 @@ async function handleRequest(request: Request) {
   const supabase = createServiceClient()
   const cutoff = new Date(Date.now() - RESYNC_INTERVAL_MS).toISOString()
 
-  // Pull posts ordered nulls-first so brand-new published posts get their
-  // first sync ahead of older ones whose stats are merely stale.
-  const { data: stale } = await supabase
+  // Two narrow queries instead of one OR'd query, so the planner can use the
+  // partial index `social_posts_engagement_sync` (filtered to status='published'
+  // AND external_id IS NOT NULL) cleanly each time. First pass picks up never-
+  // synced posts (highest priority); second pass tops up with stale ones.
+  const { data: neverSynced } = await supabase
     .from('social_posts')
     .select('*')
     .eq('status', 'published')
     .not('external_id', 'is', null)
-    .or(`engagement_synced_at.is.null,engagement_synced_at.lt.${cutoff}`)
-    .order('engagement_synced_at', { ascending: true, nullsFirst: true })
+    .is('engagement_synced_at', null)
+    .order('published_at', { ascending: false })
     .limit(BATCH_LIMIT) as { data: SocialPostRow[] | null }
 
-  if (!stale || stale.length === 0) {
+  const remaining = BATCH_LIMIT - (neverSynced?.length ?? 0)
+  let staleData: SocialPostRow[] = []
+  if (remaining > 0) {
+    const { data } = await supabase
+      .from('social_posts')
+      .select('*')
+      .eq('status', 'published')
+      .not('external_id', 'is', null)
+      .lt('engagement_synced_at', cutoff)
+      .order('engagement_synced_at', { ascending: true })
+      .limit(remaining) as { data: SocialPostRow[] | null }
+    staleData = data ?? []
+  }
+
+  const stale = [...(neverSynced ?? []), ...staleData]
+  if (stale.length === 0) {
     return Response.json({ tick_at: new Date().toISOString(), candidates: 0, synced: 0, failed: 0 })
   }
 

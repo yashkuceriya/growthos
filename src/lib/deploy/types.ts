@@ -32,4 +32,8 @@ export interface SocialPostRow {
   external_id: string | null
   external_url: string | null
   last_error: string | null
+  metadata?: { thread_ids?: string[]; partial_thread_ids?: string[]; [k: string]: unknown } | null
+  engagement?: Record<string, unknown> | null
+  engagement_synced_at?: string | null
+  engagement_sync_error?: string | null
 }

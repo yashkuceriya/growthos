@@ -1,6 +1,55 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { fetchTweetEngagement } from './twitter-engagement'
 import { fetchLinkedInEngagement } from './linkedin-engagement'
+import { mergeEngagement } from './engagement'
+
+describe('mergeEngagement', () => {
+  const fresh = {
+    likes: 10, replies: 2, shares: 1, impressions: 500,
+    synced_at: '2026-04-25T12:00:00Z', platform_raw: { latest: true },
+  }
+
+  it('takes max of monotonic counters so a regression does not clobber prior data', () => {
+    const prior = { likes: 100, replies: 5, shares: 3, impressions: 1000 }
+    const merged = mergeEngagement(prior, { ...fresh, likes: 8, replies: 4, shares: 2, impressions: 999 })
+    expect(merged.likes).toBe(100)
+    expect(merged.replies).toBe(5)
+    expect(merged.shares).toBe(3)
+    expect(merged.impressions).toBe(999) // fresh non-null preferred
+  })
+
+  it('takes max even when fresh is larger', () => {
+    const prior = { likes: 5, replies: 1, shares: 0 }
+    const merged = mergeEngagement(prior, fresh)
+    expect(merged.likes).toBe(10)
+    expect(merged.replies).toBe(2)
+    expect(merged.shares).toBe(1)
+  })
+
+  it('keeps prior impressions if fresh returns null', () => {
+    const prior = { likes: 0, replies: 0, shares: 0, impressions: 250 }
+    const merged = mergeEngagement(prior, { ...fresh, impressions: null })
+    expect(merged.impressions).toBe(250)
+  })
+
+  it('returns nulls when neither prior nor fresh has impressions', () => {
+    const merged = mergeEngagement({ likes: 1 }, { ...fresh, impressions: null })
+    expect(merged.impressions).toBeNull()
+  })
+
+  it('handles null/undefined prior cleanly', () => {
+    const merged = mergeEngagement(null, fresh)
+    expect(merged.likes).toBe(10)
+    expect(merged.synced_at).toBe('2026-04-25T12:00:00Z')
+  })
+
+  it('always replaces synced_at and platform_raw', () => {
+    const prior = { likes: 5, synced_at: '2020-01-01T00:00:00Z', platform_raw: { stale: true } }
+    const merged = mergeEngagement(prior, fresh)
+    expect(merged.synced_at).toBe(fresh.synced_at)
+    expect(merged.platform_raw).toEqual({ latest: true })
+  })
+})
 
 describe('fetchTweetEngagement', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>
