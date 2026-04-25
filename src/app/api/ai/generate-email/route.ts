@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { generateEmailCopy } from '@/lib/ai/email/generator'
 import { trackAICost, estimateCost } from '@/lib/cost-tracker'
+import { getFounderVoiceContext } from '@/lib/ai/voice/founder-voice'
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -14,6 +15,10 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Missing required fields' }, { status: 400 })
   }
 
+  // Pull proven email patterns — winner-tick promotes top open/click templates
+  // into style_references with asset_kind='email_template'.
+  const styleContext = await getFounderVoiceContext(user.id, 'email_template').catch(() => '')
+
   const result = await generateEmailCopy({
     purpose,
     audience,
@@ -22,6 +27,7 @@ export async function POST(request: Request) {
     productName,
     keyPoints,
     emailType,
+    styleContext: styleContext || undefined,
   })
 
   const model = 'google/gemini-2.0-flash-001'

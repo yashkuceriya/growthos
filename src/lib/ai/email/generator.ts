@@ -20,6 +20,10 @@ interface GenerateEmailParams {
   productName?: string
   keyPoints?: string[]
   emailType: 'welcome' | 'nurture' | 'announcement' | 'promotion' | 'followup' | 'custom'
+  // Pre-formatted block from getFounderVoiceContext — founder voice samples
+  // and promoted-winner email templates. Injected into the system prompt so
+  // high-performing patterns carry forward.
+  styleContext?: string
 }
 
 export async function generateEmailCopy(params: GenerateEmailParams): Promise<{
@@ -37,7 +41,7 @@ RULES:
 - Include a clear CTA button styled with inline CSS (background color, padding, border-radius)
 - Personalize with {{name}} placeholder where appropriate
 - Keep total email under 200 words for maximum engagement
-${params.brandVoice ? `\nBRAND VOICE: ${params.brandVoice}` : ''}`
+${params.brandVoice ? `\nBRAND VOICE: ${params.brandVoice}` : ''}${params.styleContext ? `\n\n${params.styleContext}` : ''}`
 
   const keyPointsStr = params.keyPoints?.length
     ? `\nKEY POINTS TO COVER:\n${params.keyPoints.map((p) => `- ${p}`).join('\n')}`

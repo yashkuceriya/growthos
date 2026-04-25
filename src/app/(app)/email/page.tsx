@@ -9,10 +9,10 @@ import { PageHeader } from '@/components/ui/page-header'
 import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { Plus, Mail, Users, Workflow, Sparkles, Loader2, Eye, Trash2, FileText, X } from 'lucide-react'
+import { Plus, Mail, Users, Workflow, Sparkles, Loader2, Eye, Trash2, FileText, X, Trophy } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-interface EmailTemplate { id: string; name: string; subject: string; body_html: string | null; category: string | null; created_at: string }
+interface EmailTemplate { id: string; name: string; subject: string; body_html: string | null; category: string | null; created_at: string; is_winner: boolean; winner_score: number | null }
 interface EmailList { id: string; name: string; description: string | null; subscriber_count: number }
 interface EmailSequence { id: string; name: string; trigger_type: string; status: string }
 interface EnrollmentStats { active: number; completed: number; failed: number; cancelled: number; next_due?: string | null }
@@ -243,8 +243,15 @@ export default function EmailPage() {
             {templates.map((t) => (
               <div key={t.id} className="rounded-md border border-slate-800 bg-slate-900/60 p-4">
                 <div className="flex items-start justify-between gap-3 mb-2">
-                  <h3 className="text-sm font-semibold text-slate-100">{t.name}</h3>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <h3 className="text-sm font-semibold text-slate-100 truncate">{t.name}</h3>
+                    {t.is_winner && (
+                      <StatusPill tone="success">
+                        <Trophy className="h-2.5 w-2.5" /> Top performer
+                      </StatusPill>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
                     {t.category && <StatusPill tone="neutral">{t.category}</StatusPill>}
                     {t.body_html && <button onClick={() => setPreviewHtml(t.body_html)} className="text-slate-500 hover:text-slate-300"><Eye className="h-3.5 w-3.5" /></button>}
                     <button onClick={() => deleteTemplate(t.id)} className="text-slate-500 hover:text-rose-400"><Trash2 className="h-3.5 w-3.5" /></button>

@@ -221,6 +221,14 @@ supabase/migrations/
 - **Manual override**: `POST/DELETE /api/social/winner {id}` for the social-page Trophy button. Demote also deletes the matching style_reference.
 - **Style refs flow into generation**: `/api/ai/generate-social` now calls `getFounderVoiceContext(userId, '<platform>_post')` and injects "PROVEN STYLE REFERENCES" into the system prompt — winners feed back into future drafts. The voice loader was already wired, just unfed until now.
 
+## Email winner detection (Bundle L — migration 019)
+- Same shape as Bundle K but for `email_templates`. Cron `/api/email/winner-tick` runs `0 */12 * * *`.
+- **Scorer** (`lib/ai/email/winner.ts`): `score = 0.3 × open_rate + 0.7 × click_rate` over rolling 30-day window. Click rate weighted heavier (clicks are rarer + stronger signal). `delivered` count is the denominator when Resend webhooks are wired; falls back to `sends` if not.
+- **Selector**: top 2 per project, requires `minSends ≥ 20` (don't crown 1-send templates with 100% open rate) and `minScore ≥ 0.05`. Demote = previously-flagged ids that fell out.
+- **Promotion**: copies `SUBJECT: ... \n\n <body_html>` (truncated to 8000 chars) into `style_references` with `asset_kind = 'email_template'`, `metric_proof` = JSON of {sends, delivered, opens, clicks, open_rate, click_rate, score}, `source_template_id` link for idempotency. Demote also deletes the matching style ref.
+- **Generator injection**: `/api/ai/generate-email` now calls `getFounderVoiceContext(userId, 'email_template')` and threads it through `generateEmailCopy({ ..., styleContext })` into the system prompt.
+- **UI**: email page templates now show a Trophy "Top performer" pill on `is_winner` rows.
+
 ### Migration 015 also fixed pre-existing bugs
 - `social_posts.metadata jsonb` was referenced by `/api/launch` but never existed in any prior migration — those `metadata: { launch_run: true }` inserts were failing silently. Added via `add column if not exists`.
 - `social_posts.status` check constraint widened to include `publishing | failed | cancelled` (was `draft | scheduled | published | failed`, missing `publishing` and `cancelled`).
