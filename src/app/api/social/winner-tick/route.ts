@@ -83,12 +83,18 @@ async function processProject(
 
   const { winners, demote } = selectWinners(posts)
 
-  // Demote first so the winners table-side reflects only the new set.
+  // Demote first so the winners table-side reflects only the new set. Also
+  // delete the matching style_reference — otherwise promoted refs accumulate
+  // forever and old patterns keep flowing into future generation prompts.
   for (const d of demote) {
     await supabase
       .from('social_posts')
       .update({ is_winner: false })
       .eq('id', d.id)
+    await supabase
+      .from('style_references')
+      .delete()
+      .eq('source_post_id', d.id)
   }
 
   let promoted = 0

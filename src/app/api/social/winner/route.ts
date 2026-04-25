@@ -59,7 +59,7 @@ async function handlePost(request: Request) {
     .maybeSingle()
 
   if (!existing) {
-    await service.from('style_references').insert({
+    const { error } = await service.from('style_references').insert({
       user_id: post.user_id,
       project_id: post.project_id,
       asset_kind: `${post.platform}_post`,
@@ -68,6 +68,12 @@ async function handlePost(request: Request) {
       metric_proof: JSON.stringify({ ...((post.engagement ?? {}) as Record<string, unknown>), score }),
       source_post_id: post.id,
     })
+    // 23505 = unique_violation. The partial unique index on source_post_id
+    // catches the case where a concurrent request (double-click, or the cron
+    // racing) already inserted the same ref. Treat as success.
+    if (error && error.code !== '23505') {
+      return Response.json({ error: error.message }, { status: 500 })
+    }
   }
 
   return Response.json({ ok: true, score })
