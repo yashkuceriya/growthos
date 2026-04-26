@@ -246,6 +246,13 @@ supabase/migrations/
 - **UI**: `<CreativeModePicker>` (chip grid with emoji) and `<VideoModelPicker>` (cards with $/clip + max seconds + provider). Wired into `/ad-studio/generate` — the page kicks off video render in parallel with the ad pipeline (saves 30-60s) and shows a status panel that polls `/api/video/poll/[id]` every 5s until terminal.
 - **Required env**: `FAL_KEY` for Kling/Veo/Runway/Hailuo, `OPENAI_API_KEY` for Sora 2, `XAI_API_KEY` for Grok Imagine. The codebase boots fine without any of them — only the unselected providers throw.
 
+## Video Studio (Bundle O — no migration)
+- New page `/video` (`Film` icon in sidebar). Shows the gallery of past renders for the active project — polls in-flight ones live and renders the `<video>` inline once URLs land.
+- "New Render" dialog has the full Creative Mode chip picker + Video Model card picker + duration / aspect ratio selects (defaults to 10s, 9:16 vertical).
+- API: `GET /api/video/renders?project_id=&limit=` returns the user's renders (RLS-scoped); `DELETE /api/video/renders/[id]` removes a row (we don't try to cancel upstream — providers bill on completion regardless).
+- `useVideoPolling()` hook in `hooks/use-video-polling.ts` — encapsulates the 5s polling for any active renders. Keyed on a memoized `id|status` string so the timer only restarts when the active set changes, and uses a ref-shadowed callback so the consumer can capture fresh state without resetting the interval.
+- Per-post video attach on `/social` posts is the next bundle's scope; `social_posts.video_url` + `video_render_id` columns are already in place from migration 020.
+
 ### Migration 015 also fixed pre-existing bugs
 - `social_posts.metadata jsonb` was referenced by `/api/launch` but never existed in any prior migration — those `metadata: { launch_run: true }` inserts were failing silently. Added via `add column if not exists`.
 - `social_posts.status` check constraint widened to include `publishing | failed | cancelled` (was `draft | scheduled | published | failed`, missing `publishing` and `cancelled`).
