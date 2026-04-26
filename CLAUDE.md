@@ -265,6 +265,16 @@ supabase/migrations/
   - **Ad Studio detail panel** (`/ad-studio`): button next to Generate Images. Inline `<video>` preview below the image stack.
 - The dispatcher's existing auto-attach (`lib/video/index.ts → attachVideoToParent`) writes `video_url` / `video_render_id` / `video_status` back to the parent row when the render completes — no extra wiring needed.
 
+## Background ingest queue (Bundle R — migration 021)
+- **Why**: `POST /api/v1/projects/:id/ingest` ran the crawl + LLM extract synchronously, blocking the API caller for 30-90s. Default behavior is now **async**: enqueue a job, return `202 { status: 'queued', job_id, poll_url }`. Caller polls `GET /api/v1/jobs/:id` for status + result.
+- **Backwards-compat**: pass `{ sync: true }` (or `?sync=1`) to keep the synchronous round-trip — useful for first-run integrations.
+- **Table** `ingest_jobs` (migration 021): `status (queued|running|completed|failed)`, `attempts`, `error`, `result jsonb`. Partial drain index on `created_at` where `status='queued'`.
+- **Queue lib** (`lib/jobs/ingest-queue.ts`): `enqueueIngest()` inserts a queued row; `runIngestJob()` claims via conditional UPDATE on `(id, status, attempts)` (mirrors `dispatchPost` pattern), runs `runIngest`, stamps result. Permanent errors (URL prefix `Failed to fetch site`) → `failed` immediately. Transient errors → requeue if `attempts < MAX_INGEST_ATTEMPTS` (3), else `failed`.
+- **Cron** `/api/jobs/ingest-tick` runs every 2 min via `vercel.json`, drains 5 jobs/tick, ordered oldest-first. Auth via `CRON_SECRET`.
+- **Budget gating**: `checkBudget` runs at *both* enqueue (instant 402 if already over) and post-claim (so a job queued under-budget but drained after spend climbs bails cleanly without burning the LLM call).
+- **Dashboard ingest** (`/api/projects/ingest`) stays synchronous — UI shows a spinner; queue is overkill there.
+- **Tests**: `src/lib/jobs/ingest-queue.test.ts` covers happy path, lost claim, permanent fail, transient requeue, exhaustion, and budget-after-claim.
+
 ### Migration 015 also fixed pre-existing bugs
 - `social_posts.metadata jsonb` was referenced by `/api/launch` but never existed in any prior migration — those `metadata: { launch_run: true }` inserts were failing silently. Added via `add column if not exists`.
 - `social_posts.status` check constraint widened to include `publishing | failed | cancelled` (was `draft | scheduled | published | failed`, missing `publishing` and `cancelled`).
