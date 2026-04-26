@@ -10,6 +10,8 @@ import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { Mail, Music, Search, Zap, Loader2, Plus, CheckCircle2, Circle } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { CreativeModePicker } from '@/components/ai/CreativeModePicker'
+import { VideoModelPicker } from '@/components/ai/VideoModelPicker'
 
 const PLATFORMS = [
   { key: 'meta', label: 'Meta', icon: Mail },
@@ -31,7 +33,14 @@ export default function GenerateAdsPage() {
   const [offer, setOffer] = useState('')
   const [goal, setGoal] = useState('Lead Generation')
   const [tone, setTone] = useState('Authority/Expert')
+  const [creativeMode, setCreativeMode] = useState<string | null>(null)
+  const [generateVideo, setGenerateVideo] = useState(false)
+  const [videoModel, setVideoModel] = useState('kling-2')
   const [generating, setGenerating] = useState(false)
+  const [videoRenderId, setVideoRenderId] = useState<string | null>(null)
+  const [videoStatus, setVideoStatus] = useState<'idle' | 'queued' | 'rendering' | 'completed' | 'failed'>('idle')
+  const [videoUrl, setVideoUrl] = useState<string | null>(null)
+  const [videoError, setVideoError] = useState<string | null>(null)
 
   // Auto-fill offer + audience from synced brand_voice when project changes
   useEffect(() => {
@@ -61,6 +70,47 @@ export default function GenerateAdsPage() {
     setPipeline((prev) => prev.map((s, i) => ({ ...s, status: i === 0 ? 'active' : 'pending', lines: [] })))
     setScores({})
 
+    // Kick off video render in parallel with the ad pipeline. They don't
+    // depend on each other so we save ~30-60s on the demo path.
+    if (generateVideo) {
+      setVideoStatus('queued')
+      setVideoUrl(null)
+      setVideoError(null)
+      setVideoRenderId(null)
+      fetch('/api/ai/generate-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: activeProject.id,
+          topic: offer || `${platform} ad for ${audience}`,
+          mode: creativeMode,
+          modelId: videoModel,
+          durationSeconds: 10,
+        }),
+      })
+        .then(async (r) => {
+          const j = await r.json()
+          if (!r.ok) {
+            setVideoStatus('failed')
+            setVideoError(j.error ?? 'Video render failed')
+            return
+          }
+          setVideoRenderId(j.renderId)
+          setVideoStatus(j.status === 'completed' ? 'completed' : (j.status as typeof videoStatus))
+          if (j.videoUrl) setVideoUrl(j.videoUrl)
+          if (j.error) setVideoError(j.error)
+        })
+        .catch((e) => {
+          setVideoStatus('failed')
+          setVideoError(e instanceof Error ? e.message : 'Video render failed')
+        })
+    } else {
+      setVideoStatus('idle')
+      setVideoRenderId(null)
+      setVideoUrl(null)
+      setVideoError(null)
+    }
+
     try {
       const response = await fetch('/api/ai/generate-ad', {
         method: 'POST',
@@ -72,6 +122,7 @@ export default function GenerateAdsPage() {
           productOffer: offer,
           campaignGoal: goal,
           tone,
+          creativeMode,
         }),
       })
 
@@ -113,13 +164,43 @@ export default function GenerateAdsPage() {
 
       setPipeline((prev) => prev.map((s) => ({ ...s, status: 'complete' })))
       toast.success('Ad generation complete')
-      setTimeout(() => router.push('/ad-studio'), 600)
+      // Don't redirect away if a video is still rendering — the user wants
+      // to watch it land. The ad library is a click away in the sidebar.
+      if (!generateVideo) {
+        setTimeout(() => router.push('/ad-studio'), 600)
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Generation failed')
     } finally {
       setGenerating(false)
     }
   }
+
+  // Poll video status until terminal state. fal/openai take 30-90s, so 5s
+  // cadence is fine — we won't burn rate-limit on either side.
+  useEffect(() => {
+    if (!videoRenderId) return
+    if (videoStatus === 'completed' || videoStatus === 'failed' || videoStatus === 'idle') return
+    let cancelled = false
+    const tick = async () => {
+      const res = await fetch(`/api/video/poll/${videoRenderId}`).catch(() => null)
+      if (!res || cancelled) return
+      const j = await res.json().catch(() => ({}))
+      if (cancelled) return
+      if (j.status === 'completed') {
+        setVideoStatus('completed')
+        if (j.videoUrl) setVideoUrl(j.videoUrl)
+      } else if (j.status === 'failed') {
+        setVideoStatus('failed')
+        setVideoError(j.error ?? 'Video render failed')
+      } else {
+        setVideoStatus(j.status as typeof videoStatus)
+      }
+    }
+    const interval = setInterval(tick, 5000)
+    void tick()
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [videoRenderId, videoStatus])
 
   function appendLine(msg: string) {
     setPipeline((prev) => {
@@ -218,6 +299,21 @@ export default function GenerateAdsPage() {
               </div>
             </div>
 
+            <CreativeModePicker value={creativeMode} onChange={setCreativeMode} />
+
+            <div className="rounded-md border border-slate-700 bg-slate-800/40 p-3 space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={generateVideo}
+                  onChange={(e) => setGenerateVideo(e.target.checked)}
+                  className="accent-emerald-500"
+                />
+                <span className="text-xs font-semibold text-slate-200">Also generate a 10-sec video</span>
+              </label>
+              {generateVideo && <VideoModelPicker value={videoModel} onChange={setVideoModel} />}
+            </div>
+
             <button
               type="submit"
               disabled={generating}
@@ -299,6 +395,29 @@ export default function GenerateAdsPage() {
               </div>
             ))}
           </div>
+
+          {videoStatus !== 'idle' && (
+            <div className="mt-5 rounded-md border border-slate-800 bg-slate-900/60 p-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Video Render</span>
+                <StatusPill tone={videoStatus === 'completed' ? 'success' : videoStatus === 'failed' ? 'error' : 'warn'}>
+                  {videoStatus}
+                </StatusPill>
+              </div>
+              {videoStatus === 'completed' && videoUrl && (
+                <video src={videoUrl} controls className="w-full rounded border border-slate-800" />
+              )}
+              {videoStatus !== 'completed' && videoStatus !== 'failed' && (
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>Rendering 10-sec clip — this typically takes 30–90s.</span>
+                </div>
+              )}
+              {videoStatus === 'failed' && videoError && (
+                <p className="text-xs text-rose-300 break-words">{videoError}</p>
+              )}
+            </div>
+          )}
         </SectionPanel>
       </div>
 

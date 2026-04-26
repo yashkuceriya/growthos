@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { runAdPipeline } from '@/lib/ai/ad-studio/iterator'
 import { extractInsights, saveInsights } from '@/lib/ai/ad-studio/insight-extractor'
 import { trackAICost, estimateCost } from '@/lib/cost-tracker'
+import { modeBlock } from '@/lib/ai/creative/modes'
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -14,7 +15,7 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json()
-  const { projectId, platform, audienceSegment, productOffer, campaignGoal, tone } = body
+  const { projectId, platform, audienceSegment, productOffer, campaignGoal, tone, creativeMode } = body
 
   if (!projectId || !audienceSegment || !productOffer || !campaignGoal) {
     return Response.json({ error: 'Missing required fields' }, { status: 400 })
@@ -36,10 +37,14 @@ export async function POST(request: Request) {
     .eq('id', projectId)
     .maybeSingle()
 
-  const brandVoice =
+  const baseBrandVoice =
     typeof project?.brand_voice === 'string'
       ? project.brand_voice
       : JSON.stringify(project?.brand_voice ?? {})
+  // Splice the creative-mode directive into the brand voice context the
+  // generator already passes through. No iterator/generator signature
+  // change needed — the directive becomes part of the system prompt.
+  const brandVoice = baseBrandVoice + modeBlock(creativeMode, 'copy')
 
   // Fetch existing insights for this project
   const { data: insights } = await supabase
@@ -80,6 +85,7 @@ export async function POST(request: Request) {
             product_offer: productOffer,
             campaign_goal: normalizedGoal,
             tone: tone || null,
+            creative_mode: creativeMode || null,
           })
           .select()
           .single()

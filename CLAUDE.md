@@ -236,6 +236,16 @@ supabase/migrations/
 - **UI**: analytics page now renders 4 attribution KPI cards (Leads / Converted / Conversion Rate / Attribution Coverage) + Top Sources panel + Top Campaigns panel + Source × Medium table. Hidden if no leads in the window.
 - **Buckets sort by lead count desc**; conversion rate is `converted / leads` (status='converted'). Conversion-rate badge tints emerald above 10%, amber between 0-10%, neutral at 0%.
 
+## Creative modes + video generation (Bundle N — migration 020)
+- **Universal mode lever** (`lib/ai/creative/modes.ts`): 8 modes (funny / shocking / trending / contrarian / heartfelt / urgent / aspirational / satirical), each with separate `copy_directive` and `visual_directive`. `modeBlock(id, surface)` returns a prompt-injection block; empty string for unknown/null so callers splice unconditionally.
+- **Mode-aware generators**: `/api/ai/generate-ad` accepts `creativeMode`, splices the directive into the brand-voice context the iterator already passes through. `/api/ai/generate-social` does the same, appending it to the founder-voice + style-ref block. Persisted on `ad_briefs.creative_mode` and `social_posts.creative_mode`.
+- **Multi-provider video**: `lib/video/` with three provider files (`fal.ts`, `openai.ts`, `xai.ts`) implementing a single `VideoProvider` interface. Dispatcher in `lib/video/index.ts` routes by model id. `MissingProviderKeyError` thrown cleanly when the provider's env var is unset — UI gets a "Set FAL_KEY / OPENAI_API_KEY / XAI_API_KEY" message instead of a 500.
+- **Model registry** (`lib/video/models.ts`): 6 models — Kling 2.0 (default, ~$1), Veo 3 (~$2.50), Runway Gen-4 Turbo (~$0.80), Hailuo 02 (~$0.10) via fal; Sora 2 via openai; Grok Imagine via xai. Each carries `cost_usd_per_clip` and `max_seconds` (clamped at submit time).
+- **Async submit + poll**: providers return a `providerRequestId`; we persist a row in `video_renders` (status: queued → rendering → completed/failed) with `attached_to_type`/`attached_to_id` for auto-attach to the parent `ad_copies` or `social_posts` row when complete. `/api/ai/generate-video` submits; `/api/video/poll/[id]` is the read-side.
+- **Script generation**: `lib/ai/video/script.ts` turns `(topic, mode)` into `{visual_prompt, hook_caption, voiceover}` via Gemini Flash. Visual prompt is what feeds the video model; hook_caption is the on-screen overlay.
+- **UI**: `<CreativeModePicker>` (chip grid with emoji) and `<VideoModelPicker>` (cards with $/clip + max seconds + provider). Wired into `/ad-studio/generate` — the page kicks off video render in parallel with the ad pipeline (saves 30-60s) and shows a status panel that polls `/api/video/poll/[id]` every 5s until terminal.
+- **Required env**: `FAL_KEY` for Kling/Veo/Runway/Hailuo, `OPENAI_API_KEY` for Sora 2, `XAI_API_KEY` for Grok Imagine. The codebase boots fine without any of them — only the unselected providers throw.
+
 ### Migration 015 also fixed pre-existing bugs
 - `social_posts.metadata jsonb` was referenced by `/api/launch` but never existed in any prior migration — those `metadata: { launch_run: true }` inserts were failing silently. Added via `add column if not exists`.
 - `social_posts.status` check constraint widened to include `publishing | failed | cancelled` (was `draft | scheduled | published | failed`, missing `publishing` and `cancelled`).
