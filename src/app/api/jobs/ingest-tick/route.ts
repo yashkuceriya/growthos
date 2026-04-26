@@ -6,10 +6,13 @@ export const maxDuration = 300
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { wrapHandler } from '@/lib/api-error'
-import { runIngestJob } from '@/lib/jobs/ingest-queue'
+import { runIngestJob, recoverStuckJobs } from '@/lib/jobs/ingest-queue'
 import type { IngestJob } from '@/lib/jobs/ingest-queue'
 
-const BATCH_LIMIT = 5
+// Conservative batch: each job runs an HTTP fetch + Gemini Flash extract +
+// classifier (~30-90s p95). Three jobs at p95 = ~270s, fits inside
+// maxDuration with margin. Stuck-job recovery handles the rare worst case.
+const BATCH_LIMIT = 3
 
 async function handleRequest(request: Request) {
   const auth = request.headers.get('authorization')
@@ -21,6 +24,10 @@ async function handleRequest(request: Request) {
   const supabase = createServiceClient()
   const tickAt = new Date().toISOString()
 
+  // First: rescue any rows the previous tick (or a crashed worker) left
+  // stranded in `running`. Without this they'd never be re-picked.
+  const recovered = await recoverStuckJobs(supabase)
+
   const { data: due } = await supabase
     .from('ingest_jobs')
     .select('*')
@@ -29,7 +36,14 @@ async function handleRequest(request: Request) {
     .limit(BATCH_LIMIT) as { data: IngestJob[] | null }
 
   if (!due || due.length === 0) {
-    return Response.json({ tick_at: tickAt, due: 0, completed: 0, failed: 0, requeued: 0 })
+    return Response.json({
+      tick_at: tickAt,
+      due: 0,
+      completed: 0,
+      failed: 0,
+      requeued: 0,
+      recovered,
+    })
   }
 
   let completed = 0
@@ -45,7 +59,15 @@ async function handleRequest(request: Request) {
     else skipped += 1
   }
 
-  return Response.json({ tick_at: tickAt, due: due.length, completed, failed, requeued, skipped })
+  return Response.json({
+    tick_at: tickAt,
+    due: due.length,
+    completed,
+    failed,
+    requeued,
+    skipped,
+    recovered,
+  })
 }
 
 export const GET = wrapHandler(handleRequest, 'jobs/ingest-tick')

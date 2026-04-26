@@ -4,14 +4,21 @@
 //
 // Status flow:
 //   queued → running → completed | failed
-// Retries: up to MAX_INGEST_ATTEMPTS for transient errors (bot wall, 5xx).
-// Permanent failures (4xx, no website) stamp `failed` immediately.
+// Retries: up to MAX_INGEST_ATTEMPTS for transient errors (LLM timeout, 5xx).
+// Permanent failures (URL prefix "Failed to fetch site": bot wall, 4xx, dead
+// host) stamp `failed` immediately and skip the retry ladder.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { runIngest } from '@/lib/ai/intelligence/ingest'
 import { checkBudget } from '@/lib/budget-guard'
 
 export const MAX_INGEST_ATTEMPTS = 3
+
+// If a job has been in `running` longer than this, the worker that claimed
+// it is presumed dead (serverless function timeout, OOM, container reboot).
+// The cron's recoverStuckJobs() sweeps these back to queued so they retry
+// instead of sitting forever. Set above the LLM-call p99 (~60s) with margin.
+export const STUCK_RUNNING_TIMEOUT_MS = 10 * 60 * 1000
 
 export interface IngestJob {
   id: string
@@ -148,4 +155,49 @@ export async function runIngestJob(
       .eq('id', claimed.id)
     return { id: claimed.id, finalStatus: 'queued' }
   }
+}
+
+/**
+ * Sweep jobs stuck in `running` longer than STUCK_RUNNING_TIMEOUT_MS. The
+ * worker that claimed them is dead. Reset to `queued` so the next tick
+ * retries; mark `failed` if the attempts ceiling is exhausted. Called at the
+ * top of each cron tick.
+ *
+ * Returns counts so the cron can include them in its tick-summary payload.
+ */
+export async function recoverStuckJobs(
+  supabase: SupabaseClient,
+): Promise<{ requeued: number; failed: number }> {
+  const cutoff = new Date(Date.now() - STUCK_RUNNING_TIMEOUT_MS).toISOString()
+  const { data: stuck } = await supabase
+    .from('ingest_jobs')
+    .select('id, attempts')
+    .eq('status', 'running')
+    .lt('started_at', cutoff) as { data: Array<{ id: string; attempts: number }> | null }
+
+  if (!stuck || stuck.length === 0) return { requeued: 0, failed: 0 }
+
+  let requeued = 0
+  let failed = 0
+  const nowIso = new Date().toISOString()
+  const reason = `Worker timed out (job exceeded ${STUCK_RUNNING_TIMEOUT_MS / 60000}-minute running threshold)`
+
+  for (const row of stuck) {
+    const exhausted = row.attempts >= MAX_INGEST_ATTEMPTS
+    await supabase
+      .from('ingest_jobs')
+      .update({
+        status: exhausted ? 'failed' : 'queued',
+        error: reason,
+        started_at: null,
+        completed_at: exhausted ? nowIso : null,
+        updated_at: nowIso,
+      })
+      .eq('id', row.id)
+      .eq('status', 'running')
+    if (exhausted) failed += 1
+    else requeued += 1
+  }
+
+  return { requeued, failed }
 }
