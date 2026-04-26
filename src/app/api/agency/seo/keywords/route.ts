@@ -28,7 +28,7 @@ export async function POST(request: Request) {
   const { projectId, seedKeyword } = await request.json()
   if (!projectId || !seedKeyword) return Response.json({ error: 'projectId and seedKeyword required' }, { status: 400 })
 
-  const { data: project } = await supabase.from('projects').select('name, description, brand_voice').eq('id', projectId).single()
+  const { data: project } = await supabase.from('projects').select('name, description, brand_voice').eq('id', projectId).maybeSingle()
   const bv = (project?.brand_voice as Record<string, unknown>) ?? {}
 
   const startedAt = Date.now()

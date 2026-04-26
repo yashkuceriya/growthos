@@ -38,7 +38,7 @@ export async function POST(request: Request) {
   const { projectId, pillarKeyword } = await request.json()
   if (!projectId || !pillarKeyword) return Response.json({ error: 'projectId and pillarKeyword required' }, { status: 400 })
 
-  const { data: project } = await supabase.from('projects').select('name, description, brand_voice').eq('id', projectId).single()
+  const { data: project } = await supabase.from('projects').select('name, description, brand_voice').eq('id', projectId).maybeSingle()
   const bv = (project?.brand_voice as Record<string, unknown>) ?? {}
 
   const startedAt = Date.now()

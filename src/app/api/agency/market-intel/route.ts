@@ -62,7 +62,7 @@ export async function POST(request: Request) {
   const budget = await checkBudget(supabase, projectId)
   if (!budget.ok) return budgetExceededResponse(budget)
 
-  const { data: project } = await supabase.from('projects').select('name, description, brand_voice').eq('id', projectId).single()
+  const { data: project } = await supabase.from('projects').select('name, description, brand_voice').eq('id', projectId).maybeSingle()
   if (!project) return Response.json({ error: 'Not found' }, { status: 404 })
 
   const bv = (project.brand_voice as Record<string, unknown>) ?? {}

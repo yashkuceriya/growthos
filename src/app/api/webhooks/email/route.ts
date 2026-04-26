@@ -26,8 +26,12 @@ async function handlePost(request: Request) {
     } catch {
       return Response.json({ error: 'Invalid signature' }, { status: 401 })
     }
+  } else if (process.env.NODE_ENV === 'production') {
+    // In prod we never want to accept unsigned webhooks — without the secret
+    // any unauthenticated POST could mark sends opened/clicked/bounced.
+    return Response.json({ error: 'Webhook secret not configured' }, { status: 500 })
   } else {
-    console.warn('[webhooks/email] RESEND_WEBHOOK_SECRET not set — accepting unverified webhook')
+    console.warn('[webhooks/email] RESEND_WEBHOOK_SECRET not set — accepting unverified webhook (dev only)')
   }
 
   const body = JSON.parse(rawBody)
@@ -61,7 +65,7 @@ async function handlePost(request: Request) {
 
     case 'email.bounced': {
       await supabase.from('email_sends').update({ status: 'bounced' }).eq('id', sendId)
-      const { data: send } = await supabase.from('email_sends').select('subscriber_id').eq('id', sendId).single()
+      const { data: send } = await supabase.from('email_sends').select('subscriber_id').eq('id', sendId).maybeSingle()
       if (send?.subscriber_id) {
         await supabase.from('email_subscribers').update({ status: 'bounced' }).eq('id', send.subscriber_id)
       }
@@ -69,7 +73,7 @@ async function handlePost(request: Request) {
     }
 
     case 'email.complained': {
-      const { data: spamSend } = await supabase.from('email_sends').select('subscriber_id').eq('id', sendId).single()
+      const { data: spamSend } = await supabase.from('email_sends').select('subscriber_id').eq('id', sendId).maybeSingle()
       if (spamSend?.subscriber_id) {
         await supabase.from('email_subscribers').update({
           status: 'unsubscribed',

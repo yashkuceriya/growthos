@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     .from('ad_copies')
     .select('*, ad_briefs!inner(project_id, platform, projects!inner(brand_voice, name, description, website))')
     .eq('id', adCopyId)
-    .single()
+    .maybeSingle()
 
   if (!ad) return Response.json({ error: 'Ad not found' }, { status: 404 })
 

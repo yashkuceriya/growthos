@@ -14,7 +14,7 @@ async function handlePost(request: Request) {
   const { projectId, maxPages, baseUrl: overrideUrl } = await request.json()
   if (!projectId) return Response.json({ error: 'projectId required' }, { status: 400 })
 
-  const { data: project } = await supabase.from('projects').select('website').eq('id', projectId).single()
+  const { data: project } = await supabase.from('projects').select('website').eq('id', projectId).maybeSingle()
   if (!project) return Response.json({ error: 'Not found' }, { status: 404 })
 
   const baseUrl = overrideUrl || project.website

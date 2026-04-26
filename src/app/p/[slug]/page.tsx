@@ -19,7 +19,7 @@ export default async function PublicLandingPage({ params }: { params: Promise<{ 
     .select('*')
     .eq('slug', slug)
     .eq('published', true)
-    .single()
+    .maybeSingle()
 
   if (!page) notFound()
 

@@ -155,8 +155,8 @@ async function processDueEnrollments(supabase: ReturnType<typeof createServiceCl
 
     // Load template + subscriber
     const [tmplRes, subRes] = await Promise.all([
-      supabase.from('email_templates').select('id, subject, body_html').eq('id', step.template_id).single(),
-      supabase.from('email_subscribers').select('id, email, name, status').eq('id', enrollment.subscriber_id).single(),
+      supabase.from('email_templates').select('id, subject, body_html').eq('id', step.template_id).maybeSingle(),
+      supabase.from('email_subscribers').select('id, email, name, status').eq('id', enrollment.subscriber_id).maybeSingle(),
     ])
 
     const tmpl = tmplRes.data as { id: string; subject: string; body_html: string } | null

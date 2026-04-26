@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     .from('projects')
     .select('id, name, description, website, brand_voice, slug')
     .eq('id', projectId)
-    .single()
+    .maybeSingle()
 
   if (!project) return Response.json({ error: 'Project not found' }, { status: 404 })
 

@@ -2,27 +2,51 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
-import { Zap } from 'lucide-react'
+import { Zap, Mail } from 'lucide-react'
 
 export default function SignupPage() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const router = useRouter()
+  // After signUp() succeeds Supabase emails a confirmation link. Until the user
+  // clicks it, getUser() returns null and the (app)/layout.tsx guard kicks them
+  // back to /login. So we don't redirect — we show a "check your inbox" panel
+  // and only enable the dashboard when they have a real session. If the project
+  // has email confirmation disabled in Supabase, the redirect happens on next
+  // sign-in (or via auto-session if returned).
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null)
+  const [hasSession, setHasSession] = useState(false)
   const supabase = createClient()
 
   async function handleSignup(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
-    const { error } = await supabase.auth.signUp({
-      email, password, options: { data: { full_name: name } },
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { full_name: name },
+        emailRedirectTo: `${window.location.origin}/callback`,
+      },
     })
-    if (error) toast.error(error.message)
-    else { toast.success('Account created. Check your email to confirm.'); router.push('/dashboard') }
+    if (error) {
+      toast.error(error.message)
+    } else {
+      // If the project has email confirmation off, Supabase returns a session
+      // immediately and we can go straight to /dashboard. Otherwise, show the
+      // "check your inbox" state.
+      if (data.session) {
+        toast.success('Account created.')
+        setHasSession(true)
+        window.location.href = '/dashboard'
+      } else {
+        setPendingEmail(email)
+        toast.success('Check your email to confirm your account.')
+      }
+    }
     setLoading(false)
   }
 
@@ -31,6 +55,28 @@ export default function SignupPage() {
       provider: 'google',
       options: { redirectTo: `${window.location.origin}/callback` },
     })
+  }
+
+  if (pendingEmail && !hasSession) {
+    return (
+      <div className="rounded-md border border-slate-800 bg-slate-900/80 backdrop-blur p-6 text-center">
+        <div className="mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-md bg-emerald-500/15 text-emerald-400">
+          <Mail className="h-5 w-5" />
+        </div>
+        <h1 className="text-xl font-semibold text-slate-100">Confirm your email</h1>
+        <p className="mt-2 text-sm text-slate-400">
+          We sent a confirmation link to <span className="font-semibold text-slate-200">{pendingEmail}</span>.
+          Click it to activate your account, then come back and sign in.
+        </p>
+        <Link href="/login" className="mt-6 inline-block rounded-md border border-slate-700 bg-slate-800/60 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-slate-200 hover:bg-slate-800">
+          Go to sign in
+        </Link>
+        <p className="mt-4 text-[11px] text-slate-500">
+          No email after a few minutes? Check spam, or your project may have email confirmation disabled —{' '}
+          <button onClick={() => { setPendingEmail(null) }} className="text-emerald-400 hover:text-emerald-300">try again</button>
+        </p>
+      </div>
+    )
   }
 
   return (

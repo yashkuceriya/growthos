@@ -102,7 +102,7 @@ async function handlePost(request: Request) {
   const { projectId, tool, input } = body
   if (!projectId || !tool) return Response.json({ error: 'projectId and tool required' }, { status: 400 })
 
-  const { data: project } = await supabase.from('projects').select('name, description, website, brand_voice').eq('id', projectId).single()
+  const { data: project } = await supabase.from('projects').select('name, description, website, brand_voice').eq('id', projectId).maybeSingle()
   if (!project) return Response.json({ error: 'Not found' }, { status: 404 })
 
   const bv = (project.brand_voice as Record<string, unknown>) ?? {}

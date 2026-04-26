@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     .from('email_templates')
     .select('*')
     .eq('id', templateId)
-    .single()
+    .maybeSingle()
 
   if (!template) return Response.json({ error: 'Template not found' }, { status: 404 })
 

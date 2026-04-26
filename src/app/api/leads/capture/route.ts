@@ -38,7 +38,7 @@ async function handlePost(request: Request) {
     .from('projects')
     .select('user_id')
     .eq('id', projectId)
-    .single()
+    .maybeSingle()
 
   if (!project) {
     return NextResponse.json({ error: 'Project not found' }, { status: 404 })
@@ -49,7 +49,7 @@ async function handlePost(request: Request) {
     .select('id')
     .eq('project_id', projectId)
     .eq('email', email)
-    .single()
+    .maybeSingle()
 
   if (existing) {
     await supabase.from('lead_events').insert({

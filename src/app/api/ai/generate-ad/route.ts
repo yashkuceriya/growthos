@@ -34,7 +34,7 @@ export async function POST(request: Request) {
     .from('projects')
     .select('brand_voice, settings')
     .eq('id', projectId)
-    .single()
+    .maybeSingle()
 
   const brandVoice =
     typeof project?.brand_voice === 'string'

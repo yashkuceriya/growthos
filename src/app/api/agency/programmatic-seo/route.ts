@@ -55,7 +55,7 @@ export async function POST(request: Request) {
   const { projectId, tool, input } = await request.json() as { projectId: string; tool: Tool; input?: Record<string, unknown> }
   if (!projectId || !tool) return Response.json({ error: 'projectId and tool required' }, { status: 400 })
 
-  const { data: project } = await supabase.from('projects').select('name, description, brand_voice, website, slug').eq('id', projectId).single()
+  const { data: project } = await supabase.from('projects').select('name, description, brand_voice, website, slug').eq('id', projectId).maybeSingle()
   if (!project) return Response.json({ error: 'Not found' }, { status: 404 })
 
   const bv = (project.brand_voice as Record<string, unknown>) ?? {}

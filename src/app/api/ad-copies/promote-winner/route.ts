@@ -19,7 +19,7 @@ async function handlePost(request: Request) {
     .from('ad_copies')
     .select('id, user_id, variant_group')
     .eq('id', adCopyId)
-    .single()
+    .maybeSingle()
 
   if (!ad) return Response.json({ error: 'Ad copy not found' }, { status: 404 })
   if (ad.user_id !== user.id) return Response.json({ error: 'Forbidden' }, { status: 403 })
