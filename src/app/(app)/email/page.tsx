@@ -155,6 +155,22 @@ export default function EmailPage() {
     if (error) toast.error(error.message); else { toast.success('Deleted'); fetchAll() }
   }
 
+  const [winnerBusyId, setWinnerBusyId] = useState<string | null>(null)
+  async function toggleWinner(id: string, currentlyWinner: boolean) {
+    setWinnerBusyId(id)
+    try {
+      const res = await fetch('/api/email/winner', {
+        method: currentlyWinner ? 'DELETE' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) toast.error(json.error ?? 'Update failed')
+      else { toast.success(currentlyWinner ? 'Demoted' : 'Promoted to style reference'); fetchAll() }
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Update failed') }
+    setWinnerBusyId(null)
+  }
+
   const TABS: Array<{ key: Tab; label: string; icon: typeof Mail; count: number }> = [
     { key: 'templates', label: 'Templates', icon: FileText, count: templates.length },
     { key: 'lists', label: 'Lists', icon: Users, count: lists.length },
@@ -253,6 +269,14 @@ export default function EmailPage() {
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     {t.category && <StatusPill tone="neutral">{t.category}</StatusPill>}
+                    <button
+                      onClick={() => toggleWinner(t.id, t.is_winner)}
+                      disabled={winnerBusyId === t.id}
+                      title={t.is_winner ? 'Remove from style references' : 'Promote to style references'}
+                      className={t.is_winner ? 'text-emerald-400 hover:text-emerald-300 disabled:opacity-50' : 'text-slate-500 hover:text-slate-300 disabled:opacity-50'}
+                    >
+                      <Trophy className="h-3.5 w-3.5" />
+                    </button>
                     {t.body_html && <button onClick={() => setPreviewHtml(t.body_html)} className="text-slate-500 hover:text-slate-300"><Eye className="h-3.5 w-3.5" /></button>}
                     <button onClick={() => deleteTemplate(t.id)} className="text-slate-500 hover:text-rose-400"><Trash2 className="h-3.5 w-3.5" /></button>
                   </div>

@@ -11,6 +11,7 @@ export const maxDuration = 300
 import { createServiceClient } from '@/lib/supabase/server'
 import { wrapHandler } from '@/lib/api-error'
 import { selectTemplateWinners, DEFAULT_WINNER_OPTS, type TemplateStats } from '@/lib/ai/email/winner'
+import { htmlToText } from '@/lib/ai/email/html-to-text'
 
 interface ProjectRow { id: string; user_id: string }
 interface TemplateRow {
@@ -23,6 +24,14 @@ interface TemplateRow {
   is_winner: boolean
 }
 
+// Status state machine: queued → sent → delivered → opened → clicked. Each
+// terminal status implies the prior ones, so we bucket monotonically.
+//   bounced — counts as a "send" attempt for denominator purposes (it left
+//             our SMTP) but not as delivered/opened/clicked.
+//   failed  — pre-send error (rejected by Resend, malformed address). NOT
+//             counted in any bucket: it was never a real send opportunity,
+//             so including it would either penalize or reward the template
+//             based on infrastructure issues rather than copy quality.
 const CLICKED_LIKE = ['clicked'] as const
 const OPENED_LIKE = ['opened', 'clicked'] as const
 const DELIVERED_LIKE = ['delivered', 'opened', 'clicked'] as const
@@ -89,9 +98,12 @@ async function promoteToStyleRef(
   const clickPct = reach > 0 ? Math.round((stats.clicks / reach) * 100) : 0
   const whyGood = `Top template — ${openPct}% open rate, ${clickPct}% click rate over ${reach} delivered`
 
-  // The style ref content is the SUBJECT + body so the email generator gets
-  // the full pattern (subject lines are the highest-leverage part).
-  const assetContent = `SUBJECT: ${template.subject}\n\n${template.body_html ?? ''}`.slice(0, 8000)
+  // Style ref content: SUBJECT + plaintext body. Storing raw HTML here would
+  // truncate mid-tag at the slice() boundary, leaving malformed markup that
+  // pollutes future prompts. The ML model only needs the words + paragraph
+  // structure to emulate the pattern, not <table>/<style> scaffolding.
+  const bodyText = htmlToText(template.body_html ?? '')
+  const assetContent = `SUBJECT: ${template.subject}\n\n${bodyText}`.slice(0, 4000)
 
   const { error } = await supabase.from('style_references').insert({
     user_id: template.user_id,
