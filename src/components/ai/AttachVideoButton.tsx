@@ -5,7 +5,7 @@
 // with the right attachTo, and live-polls until the dispatcher attaches the
 // video URL to the parent row. Parent should call onComplete to refresh.
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Film, Loader2, ExternalLink, AlertTriangle } from 'lucide-react'
@@ -43,8 +43,17 @@ export function AttachVideoButton({
   const [duration, setDuration] = useState(10)
   const [submitting, setSubmitting] = useState(false)
 
+  // We track the local view of status/url so the polling hook can update it
+  // between parent refetches, but we ALSO sync from props when the parent
+  // changes (e.g. user generates a second video on a different ad row that
+  // remounts this component into a new context). Without this sync, props
+  // drift past local state and the UI shows the previous video URL.
   const [localStatus, setLocalStatus] = useState<string | null>(videoStatus ?? null)
   const [localUrl, setLocalUrl] = useState<string | null>(videoUrl ?? null)
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { setLocalStatus(videoStatus ?? null) }, [videoStatus])
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { setLocalUrl(videoUrl ?? null) }, [videoUrl])
 
   // Poll if a render is in flight (either passed in or just created locally).
   const activeRenderId = renderId ?? null

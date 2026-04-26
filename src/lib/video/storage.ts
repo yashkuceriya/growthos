@@ -45,9 +45,16 @@ export async function mirrorToStorage(
     if (!data?.publicUrl) throw new Error('No public URL returned')
     return { mirrored: true, newUrl: data.publicUrl }
   } catch (err) {
-    return {
-      mirrored: false,
-      error: err instanceof Error ? err.message : 'mirror failed',
+    const msg = err instanceof Error ? err.message : 'mirror failed'
+    // Bucket-not-found is the most common misconfig — make it loud in logs
+    // so the operator sees the missing-bucket gap, not just a generic warn.
+    if (/bucket not found|does not exist|404/i.test(msg)) {
+      console.error(
+        `[video/storage] Bucket "${bucket}" missing — create it in Supabase Storage to enable video mirror, or unset VIDEO_STORAGE_BUCKET to disable. Falling back to upstream URL.`,
+      )
+    } else {
+      console.error('[video/storage] Mirror failed:', msg)
     }
+    return { mirrored: false, error: msg }
   }
 }

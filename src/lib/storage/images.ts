@@ -85,7 +85,14 @@ export async function uploadAdImage(args: UploadAdImageArgs): Promise<string> {
     if (!data?.publicUrl) throw new Error('No public URL returned')
     return data.publicUrl
   } catch (err) {
-    console.error(`[storage/images] Upload to bucket "${bucket()}" failed — falling back to data URL. Error:`, err)
+    const msg = err instanceof Error ? err.message : String(err)
+    if (/bucket not found|does not exist|404/i.test(msg)) {
+      console.error(
+        `[storage/images] Bucket "${bucket()}" missing — create it in Supabase Storage (or set IMAGE_STORAGE_BUCKET to an existing bucket). Falling back to data URL — ad_copies.media_urls will hold ~200KB base64 strings until fixed.`,
+      )
+    } else {
+      console.error(`[storage/images] Upload to bucket "${bucket()}" failed — falling back to data URL. Error:`, msg)
+    }
     return args.source
   }
 }

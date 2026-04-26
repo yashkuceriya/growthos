@@ -111,12 +111,15 @@ ${trimmed}`,
     ingested_at: new Date().toISOString(),
   }
 
-  // Pull project name/description for the classifier context
+  // Pull project name/description/website for the classifier context AND so
+  // we can decide whether to update the website column (only when it's empty
+  // — never silently rewrite a user-set value just because an API caller
+  // passed a different override).
   const { data: existing } = await supabase
     .from('projects')
-    .select('name, description')
+    .select('name, description, website')
     .eq('id', projectId)
-    .single()
+    .maybeSingle() as { data: { name: string; description: string | null; website: string | null } | null }
 
   let classification = null
   try {
@@ -136,16 +139,19 @@ ${trimmed}`,
 
   await mergeBrandVoice(supabase, projectId, patch)
 
-  // Backfill the project's description column from the value_proposition we
-  // just discovered, but only if the user hasn't set one — never overwrite
-  // their words. This was a real gap: users created projects with empty
-  // descriptions, synced, and the project list still showed nothing because
-  // brand_voice.value_proposition wasn't surfaced as the project description.
-  const projectUpdate: Record<string, unknown> = { website: url }
+  // Backfill the project's description from the value_proposition we just
+  // discovered, but only if the user hasn't set one — never overwrite their
+  // words. Same policy for website: only stamp it when it was empty so a
+  // misconfigured API caller can't silently mutate a project's canonical
+  // domain via the override parameter on /api/v1/projects/:id/ingest.
+  const projectUpdate: Record<string, unknown> = {}
+  if (!existing?.website) projectUpdate.website = url
   if (!existing?.description && typeof normalized.value_proposition === 'string' && normalized.value_proposition.length > 0) {
     projectUpdate.description = normalized.value_proposition.slice(0, 500)
   }
-  await supabase.from('projects').update(projectUpdate).eq('id', projectId)
+  if (Object.keys(projectUpdate).length > 0) {
+    await supabase.from('projects').update(projectUpdate).eq('id', projectId)
+  }
 
   await trackAICost({
     userId,

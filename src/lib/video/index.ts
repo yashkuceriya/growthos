@@ -154,11 +154,16 @@ export async function pollVideoRender(
         userId: data.user_id,
         sourceUrl: finalUrl,
       })
+      // Merge mirror status into existing metadata — never overwrite. The
+      // submit path stamps {mode, hook_caption, topic} which we want to
+      // preserve through completion so downstream UIs (and the Video Studio
+      // gallery) can show why each clip was generated.
+      const baseMeta = (data.metadata ?? {}) as Record<string, unknown>
       if (mirror.mirrored && mirror.newUrl) {
         finalUrl = mirror.newUrl
-        update.metadata = { mirrored_from: result.videoUrl, mirrored: true }
+        update.metadata = { ...baseMeta, mirrored_from: result.videoUrl, mirrored: true }
       } else if (mirror.error) {
-        update.metadata = { mirror_error: mirror.error }
+        update.metadata = { ...baseMeta, mirror_error: mirror.error }
       }
 
       update.video_url = finalUrl
@@ -201,6 +206,7 @@ interface VideoRenderRow {
   error: string | null
   attached_to_type: string | null
   attached_to_id: string | null
+  metadata: Record<string, unknown> | null
 }
 
 async function attachVideoToParent(
