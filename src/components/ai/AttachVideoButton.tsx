@@ -28,11 +28,13 @@ interface Props {
   /** Called when a render finishes (any terminal status). Parent should refetch. */
   onComplete?: () => void
   className?: string
+  /** Optional ad image URL to use as the init frame for image-to-video. */
+  referenceImageUrl?: string | null
 }
 
 export function AttachVideoButton({
   attachTo, projectId, topicDefault, videoUrl, renderId, videoStatus,
-  onComplete, className,
+  onComplete, className, referenceImageUrl,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [topic, setTopic] = useState(topicDefault.slice(0, 400))
@@ -71,6 +73,10 @@ export function AttachVideoButton({
           modelId,
           durationSeconds: duration,
           attachTo,
+          // Image-to-video chain: when the parent ad already has a generated
+          // image, pass it as the init frame so the video reflects the same
+          // visual identity. Models that don't support image_init ignore it.
+          referenceImageUrl: referenceImageUrl ?? undefined,
         }),
       })
       const j = await res.json()

@@ -202,6 +202,10 @@ export default function AdStudioPage() {
                       videoUrl={selected.video_url}
                       renderId={selected.video_render_id}
                       videoStatus={selected.video_status}
+                      // Image-to-video chain: feed the first generated image
+                      // back in as the init frame for the video render so
+                      // the clip inherits the ad's visual identity.
+                      referenceImageUrl={selected.media_urls?.[0] ?? null}
                       onComplete={fetchAds}
                     />
                   )}
