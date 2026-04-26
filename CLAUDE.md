@@ -253,6 +253,13 @@ supabase/migrations/
 - `useVideoPolling()` hook in `hooks/use-video-polling.ts` — encapsulates the 5s polling for any active renders. Keyed on a memoized `id|status` string so the timer only restarts when the active set changes, and uses a ref-shadowed callback so the consumer can capture fresh state without resetting the interval.
 - Per-post video attach on `/social` posts is the next bundle's scope; `social_posts.video_url` + `video_render_id` columns are already in place from migration 020.
 
+## Per-asset video attach (Bundle P — no migration)
+- New `<AttachVideoButton>` component in `components/ai/`. Drop-in for any list of ad_copies / social_posts. Manages dialog state, calls `/api/ai/generate-video` with `attachTo: {type, id}`, polls until terminal via `useVideoPolling`, surfaces 4 states inline: idle (button), in-flight (spinner pill), failed (retry pill), completed (link to video).
+- Wired into:
+  - **Social posts list** (`/social`): per-post button next to the Trophy / Trash actions. Inline `<video>` preview when `video_url` is set.
+  - **Ad Studio detail panel** (`/ad-studio`): button next to Generate Images. Inline `<video>` preview below the image stack.
+- The dispatcher's existing auto-attach (`lib/video/index.ts → attachVideoToParent`) writes `video_url` / `video_render_id` / `video_status` back to the parent row when the render completes — no extra wiring needed.
+
 ### Migration 015 also fixed pre-existing bugs
 - `social_posts.metadata jsonb` was referenced by `/api/launch` but never existed in any prior migration — those `metadata: { launch_run: true }` inserts were failing silently. Added via `add column if not exists`.
 - `social_posts.status` check constraint widened to include `publishing | failed | cancelled` (was `draft | scheduled | published | failed`, missing `publishing` and `cancelled`).

@@ -11,6 +11,7 @@ import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { Sparkles, Plus, Image as ImageIcon, ShieldCheck, AlertTriangle, Zap, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { AttachVideoButton } from '@/components/ai/AttachVideoButton'
 
 interface AdCopy {
   id: string
@@ -26,6 +27,9 @@ interface AdCopy {
   compliance: Record<string, unknown> | null
   media_urls: string[] | null
   created_at: string
+  video_url: string | null
+  video_render_id: string | null
+  video_status: string | null
 }
 
 type Tab = 'review' | 'approved' | 'all'
@@ -190,6 +194,17 @@ export default function AdStudioPage() {
                     {generatingImages ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
                     {selected.media_urls?.length ? 'Regenerate Images' : 'Generate Images'}
                   </button>
+                  {activeProject && (
+                    <AttachVideoButton
+                      attachTo={{ type: 'ad_copy', id: selected.id }}
+                      projectId={activeProject.id}
+                      topicDefault={selected.primary_text ?? selected.headline ?? selected.description ?? ''}
+                      videoUrl={selected.video_url}
+                      renderId={selected.video_render_id}
+                      videoStatus={selected.video_status}
+                      onComplete={fetchAds}
+                    />
+                  )}
                   {selected.status !== 'human_approved' && (
                     <>
                       <button onClick={() => updateStatus(selected.id, 'rejected')} className="rounded-md border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-800">
@@ -217,6 +232,11 @@ export default function AdStudioPage() {
               <div className="aspect-[16/10] w-full rounded-md bg-gradient-to-br from-emerald-950 via-slate-900 to-slate-950 flex flex-col items-center justify-center gap-2">
                 <ImageIcon className="h-10 w-10 text-slate-700" />
                 <p className="text-xs text-slate-500">No images yet — click Generate Images</p>
+              </div>
+            )}
+            {selected?.video_url && (
+              <div className="mt-3 rounded-md overflow-hidden border border-emerald-500/40 bg-slate-950">
+                <video src={selected.video_url} controls className="w-full" />
               </div>
             )}
             {selected && (selected.primary_text || selected.description || selected.cta_button) && (

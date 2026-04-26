@@ -12,6 +12,7 @@ import { StatusPill } from '@/components/ui/status-pill'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Plus, Share2, Calendar, PenLine, Sparkles, Loader2, Clock, MessageCircle, Briefcase, Camera, Trash2, ChevronLeft, ChevronRight, Send, ExternalLink, AlertTriangle, Heart, MessageSquare, Repeat2, Eye, RefreshCw, Trophy } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { AttachVideoButton } from '@/components/ai/AttachVideoButton'
 
 interface Engagement {
   likes?: number; replies?: number; shares?: number
@@ -28,6 +29,9 @@ interface SocialPost {
   engagement_sync_error: string | null
   is_winner: boolean
   winner_score: number | null
+  video_url: string | null
+  video_render_id: string | null
+  video_status: string | null
 }
 
 const ICON: Record<string, typeof MessageCircle> = { twitter: MessageCircle, linkedin: Briefcase, instagram: Camera }
@@ -321,6 +325,11 @@ export default function SocialPage() {
                         )}
                       </div>
                       <p className="text-sm text-slate-300 whitespace-pre-wrap">{p.content}</p>
+                      {p.video_url && (
+                        <div className="mt-2 rounded-md overflow-hidden border border-emerald-500/40 bg-slate-950 max-w-md">
+                          <video src={p.video_url} controls className="w-full" />
+                        </div>
+                      )}
                       {p.status === 'published' && p.engagement && (
                         <div className="mt-2 flex items-center gap-3 text-[11px] text-slate-400">
                           <span className="flex items-center gap-1"><Heart className="h-3 w-3" /> {p.engagement.likes ?? 0}</span>
@@ -378,6 +387,17 @@ export default function SocialPage() {
                         >
                           <Trophy className="h-3 w-3" />
                         </button>
+                      )}
+                      {activeProject && (
+                        <AttachVideoButton
+                          attachTo={{ type: 'social_post', id: p.id }}
+                          projectId={activeProject.id}
+                          topicDefault={p.content}
+                          videoUrl={p.video_url}
+                          renderId={p.video_render_id}
+                          videoStatus={p.video_status}
+                          onComplete={fetchPosts}
+                        />
                       )}
                       <button onClick={() => deletePost(p.id)} className="text-slate-500 hover:text-rose-400"><Trash2 className="h-4 w-4" /></button>
                     </div>
