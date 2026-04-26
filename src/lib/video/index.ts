@@ -10,6 +10,7 @@ import type { VideoProvider, VideoSubmitArgs } from './types'
 import { MissingProviderKeyError } from './types'
 import { getModel } from './models'
 import type { VideoModel } from './models'
+import { mirrorToStorage } from './storage'
 
 const PROVIDERS: Record<string, VideoProvider> = {
   fal: falProvider,
@@ -142,8 +143,25 @@ export async function pollVideoRender(
   try {
     const result = await provider.poll(model.id, data.provider_request_id)
     const update: Record<string, unknown> = { status: result.status }
-    if (result.status === 'completed') {
-      update.video_url = result.videoUrl
+    let finalUrl = result.videoUrl
+
+    if (result.status === 'completed' && finalUrl) {
+      // Optionally mirror the upstream signed URL to Supabase Storage so the
+      // video survives provider expiry. mirrorToStorage no-ops when the env
+      // var isn't set; on failure we keep the upstream URL.
+      const mirror = await mirrorToStorage(supabase, {
+        renderId,
+        userId: data.user_id,
+        sourceUrl: finalUrl,
+      })
+      if (mirror.mirrored && mirror.newUrl) {
+        finalUrl = mirror.newUrl
+        update.metadata = { mirrored_from: result.videoUrl, mirrored: true }
+      } else if (mirror.error) {
+        update.metadata = { mirror_error: mirror.error }
+      }
+
+      update.video_url = finalUrl
       update.thumbnail_url = result.thumbnailUrl ?? null
       update.completed_at = new Date().toISOString()
       update.cost_usd = result.costUsd ?? model.cost_usd_per_clip
@@ -151,19 +169,19 @@ export async function pollVideoRender(
     if (result.status === 'failed') update.error = result.error ?? null
     await supabase.from('video_renders').update(update).eq('id', renderId)
 
-    if (result.status === 'completed' && data.attached_to_type && data.attached_to_id && result.videoUrl) {
+    if (result.status === 'completed' && data.attached_to_type && data.attached_to_id && finalUrl) {
       await attachVideoToParent(
         supabase,
         { type: data.attached_to_type as 'ad_copy' | 'social_post', id: data.attached_to_id },
         renderId,
-        result.videoUrl,
+        finalUrl,
       )
     }
 
     return {
       renderId,
       status: result.status,
-      videoUrl: result.videoUrl,
+      videoUrl: finalUrl,
       error: result.error,
     }
   } catch (err) {
@@ -175,6 +193,7 @@ export async function pollVideoRender(
 
 interface VideoRenderRow {
   id: string
+  user_id: string
   status: string
   model: string
   provider_request_id: string | null

@@ -253,6 +253,11 @@ supabase/migrations/
 - `useVideoPolling()` hook in `hooks/use-video-polling.ts` — encapsulates the 5s polling for any active renders. Keyed on a memoized `id|status` string so the timer only restarts when the active set changes, and uses a ref-shadowed callback so the consumer can capture fresh state without resetting the interval.
 - Per-post video attach on `/social` posts is the next bundle's scope; `social_posts.video_url` + `video_render_id` columns are already in place from migration 020.
 
+## Video reliability (Bundle Q — no migration)
+- **Cron `/api/video/poll-tick`**: every 2 min via `vercel.json`. Drains up to 25 renders with `status IN ('queued', 'rendering')`. Calls the same `pollVideoRender()` the UI uses, so all polling paths share one code path. Catches the "user closed the tab and the render is now orphaned" gap.
+- **Stuck-job timeout**: if a render has been queued/rendering for > 30 min, the cron flips it to `failed` with a "exceeded timeout" message. Prevents the gallery from looping forever on a render the upstream silently dropped.
+- **Optional Storage mirror** (`lib/video/storage.ts`): on completion, if `VIDEO_STORAGE_BUCKET` env var is set, fetch the upstream signed URL and re-upload to Supabase Storage at `<user_id>/<render_id>.mp4`. The `video_url` column is replaced with the Supabase public URL so the link survives the 24-48h CDN expiry on fal/openai/xai. No-op when unset; falls through to upstream URL on any mirror failure — never blocks completion. `metadata.mirrored_from` records the original URL for debugging.
+
 ## Per-asset video attach (Bundle P — no migration)
 - New `<AttachVideoButton>` component in `components/ai/`. Drop-in for any list of ad_copies / social_posts. Manages dialog state, calls `/api/ai/generate-video` with `attachTo: {type, id}`, polls until terminal via `useVideoPolling`, surfaces 4 states inline: idle (button), in-flight (spinner pill), failed (retry pill), completed (link to video).
 - Wired into:
