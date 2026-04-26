@@ -35,6 +35,16 @@ interface AICostEntry {
   created_at: string
 }
 
+interface AttributionBucket { key: string; display: string; leads: number; converted: number; conversion_rate: number }
+interface AttributionResp {
+  window_days: number
+  summary: { total_leads: number; total_converted: number; conversion_rate: number; attributed_leads: number; attribution_coverage: number }
+  by_source: AttributionBucket[]
+  by_medium: AttributionBucket[]
+  by_campaign: AttributionBucket[]
+  by_source_medium: AttributionBucket[]
+}
+
 const RANGES = [
   { key: '7d', label: '7D', days: 7 },
   { key: '30d', label: '30D', days: 30 },
@@ -47,6 +57,7 @@ export default function AnalyticsPage() {
 
   const [metrics, setMetrics] = useState<CampaignMetric[]>([])
   const [aiCosts, setAiCosts] = useState<AICostEntry[]>([])
+  const [attribution, setAttribution] = useState<AttributionResp | null>(null)
   const [range, setRange] = useState<typeof RANGES[number]['key']>('30d')
 
   useEffect(() => {
@@ -72,6 +83,12 @@ export default function AnalyticsPage() {
 
     const { data: costsData } = await supabase.from('ai_cost_ledger').select('*').eq('project_id', activeProject.id).order('created_at', { ascending: false })
     setAiCosts((costsData as AICostEntry[]) ?? [])
+
+    try {
+      const res = await fetch(`/api/analytics/attribution?project_id=${activeProject.id}&days=${days}`)
+      if (res.ok) setAttribution(await res.json())
+      else setAttribution(null)
+    } catch { setAttribution(null) }
   }
 
   const totals = useMemo(() => metrics.reduce(
@@ -214,6 +231,104 @@ export default function AnalyticsPage() {
           )}
         </SectionPanel>
       </div>
+
+      {/* Attribution rollup */}
+      {attribution && attribution.summary.total_leads > 0 && (
+        <>
+          <div className="grid grid-cols-4 gap-4 mb-4">
+            {[
+              { label: 'Leads (window)', value: attribution.summary.total_leads.toLocaleString(), pct: 100, color: 'bg-emerald-400' },
+              { label: 'Converted', value: attribution.summary.total_converted.toLocaleString(), pct: Math.round(attribution.summary.conversion_rate * 100), color: 'bg-cyan-400' },
+              { label: 'Conversion Rate', value: `${(attribution.summary.conversion_rate * 100).toFixed(1)}%`, pct: Math.min(100, attribution.summary.conversion_rate * 100 * 5), color: 'bg-emerald-400' },
+              { label: 'Attribution Coverage', value: `${(attribution.summary.attribution_coverage * 100).toFixed(0)}%`, pct: Math.round(attribution.summary.attribution_coverage * 100), color: 'bg-amber-400' },
+            ].map((k) => (
+              <div key={k.label} className="rounded-md border border-slate-800 bg-slate-900/60 p-4 flex flex-col gap-3">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{k.label}</span>
+                <div className="font-mono-data text-2xl font-semibold text-slate-100">{k.value}</div>
+                <div className="h-1 w-full overflow-hidden rounded-full bg-slate-800">
+                  <div className={`h-full ${k.color}`} style={{ width: `${k.pct}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <SectionPanel title="Top Sources">
+              {attribution.by_source.length === 0 ? (
+                <p className="text-sm text-slate-500 py-6 text-center">No source data</p>
+              ) : (
+                <ul className="space-y-2">
+                  {attribution.by_source.slice(0, 8).map((s) => (
+                    <li key={s.key} className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-slate-200">{s.display}</span>
+                      <span className="flex items-center gap-3 font-mono-data">
+                        <span className="text-slate-300">{s.leads}</span>
+                        <span className={s.conversion_rate > 0 ? 'text-emerald-400' : 'text-slate-500'}>
+                          {(s.conversion_rate * 100).toFixed(0)}%
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </SectionPanel>
+
+            <SectionPanel title="Top Campaigns">
+              {attribution.by_campaign.length === 0 ? (
+                <p className="text-sm text-slate-500 py-6 text-center">No campaign-attributed leads</p>
+              ) : (
+                <ul className="space-y-2">
+                  {attribution.by_campaign.slice(0, 8).map((c) => (
+                    <li key={c.key} className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-slate-200 truncate">{c.display}</span>
+                      <span className="flex items-center gap-3 font-mono-data shrink-0">
+                        <span className="text-slate-300">{c.leads}</span>
+                        <span className={c.conversion_rate > 0 ? 'text-emerald-400' : 'text-slate-500'}>
+                          {(c.conversion_rate * 100).toFixed(0)}%
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </SectionPanel>
+          </div>
+
+          <SectionPanel title="Source × Medium" contentClassName="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-800">
+                    <th className="px-4 py-2.5 text-left">Source / Medium</th>
+                    <th className="px-4 py-2.5 text-right">Leads</th>
+                    <th className="px-4 py-2.5 text-right">Converted</th>
+                    <th className="px-4 py-2.5 text-right">Rate</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {attribution.by_source_medium.slice(0, 12).map((row) => (
+                    <tr key={row.key} className="hover:bg-slate-800/40">
+                      <td className="px-4 py-2 font-semibold text-slate-100">{row.display}</td>
+                      <td className="px-4 py-2 text-right font-mono-data text-slate-300">{row.leads}</td>
+                      <td className="px-4 py-2 text-right font-mono-data text-slate-300">{row.converted}</td>
+                      <td className="px-4 py-2 text-right">
+                        <StatusPill tone={row.conversion_rate >= 0.1 ? 'success' : row.conversion_rate > 0 ? 'warn' : 'neutral'}>
+                          {(row.conversion_rate * 100).toFixed(1)}%
+                        </StatusPill>
+                      </td>
+                    </tr>
+                  ))}
+                  {attribution.by_source_medium.length === 0 && (
+                    <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500">No attributed leads in this window</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </SectionPanel>
+
+          <div className="h-4" />
+        </>
+      )}
 
       {/* AI cost breakdown table */}
       <SectionPanel

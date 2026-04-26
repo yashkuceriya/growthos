@@ -229,6 +229,13 @@ supabase/migrations/
 - **Generator injection**: `/api/ai/generate-email` now calls `getFounderVoiceContext(userId, 'email_template')` and threads it through `generateEmailCopy({ ..., styleContext })` into the system prompt.
 - **UI**: email page templates now show a Trophy "Top performer" pill on `is_winner` rows.
 
+## Attribution rollup (Bundle M — uses migration 010)
+- Migration 010 added utm_* + campaign_id columns to leads/content/landing_pages but the data was invisible. Bundle M surfaces it.
+- **Pure aggregator** (`lib/analytics/attribution.ts`): `rollupBySource` (prefers utm_source, falls back to free-text source, falls back to "(direct)"), `rollupByMedium`, `rollupByCampaign` (joins campaign names from a `Map<id, name>`), `rollupBySourceMedium` (cross-tab), `summarize` (totals + attribution coverage). All pure, all tested.
+- **API**: `GET /api/analytics/attribution?project_id=&days=` → returns `{summary, by_source, by_medium, by_campaign, by_source_medium}`. RLS scopes leads to the user; we additionally filter by project_id for cross-project safety. Pulls campaign names only for ids that appear (one extra round-trip).
+- **UI**: analytics page now renders 4 attribution KPI cards (Leads / Converted / Conversion Rate / Attribution Coverage) + Top Sources panel + Top Campaigns panel + Source × Medium table. Hidden if no leads in the window.
+- **Buckets sort by lead count desc**; conversion rate is `converted / leads` (status='converted'). Conversion-rate badge tints emerald above 10%, amber between 0-10%, neutral at 0%.
+
 ### Migration 015 also fixed pre-existing bugs
 - `social_posts.metadata jsonb` was referenced by `/api/launch` but never existed in any prior migration — those `metadata: { launch_run: true }` inserts were failing silently. Added via `add column if not exists`.
 - `social_posts.status` check constraint widened to include `publishing | failed | cancelled` (was `draft | scheduled | published | failed`, missing `publishing` and `cancelled`).
