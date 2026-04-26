@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { checkBudget, budgetExceededResponse } from '@/lib/budget-guard'
 import { generateObject } from 'ai'
 import { modelFor } from '@/lib/ai/models'
 import { z } from 'zod'
@@ -41,6 +42,9 @@ async function handlePost(request: Request) {
 
   const { projectId } = await request.json()
   if (!projectId) return Response.json({ error: 'projectId required' }, { status: 400 })
+
+  const budget = await checkBudget(supabase, projectId)
+  if (!budget.ok) return budgetExceededResponse(budget)
 
   const { data: project } = await supabase.from('projects').select('name, description, brand_voice').eq('id', projectId).maybeSingle()
   if (!project) return Response.json({ error: 'Not found' }, { status: 404 })

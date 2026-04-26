@@ -1,6 +1,7 @@
 // PR / Media Kit suite — press kit, release, journalist pitches, HARO replies,
 // podcast guest pitch, speaking pitch, awards applications, newsjacking.
 import { createClient } from '@/lib/supabase/server'
+import { checkBudget, budgetExceededResponse } from '@/lib/budget-guard'
 import { generateObject } from 'ai'
 import { modelFor } from '@/lib/ai/models'
 import { z } from 'zod'
@@ -168,6 +169,9 @@ export async function POST(request: Request) {
 
   const { projectId, tool, input } = await request.json() as { projectId: string; tool: Tool; input?: Record<string, unknown> }
   if (!projectId || !tool) return Response.json({ error: 'projectId and tool required' }, { status: 400 })
+
+  const budget = await checkBudget(supabase, projectId)
+  if (!budget.ok) return budgetExceededResponse(budget)
 
   const { data: project } = await supabase.from('projects').select('name, description, website, brand_voice').eq('id', projectId).maybeSingle()
   if (!project) return Response.json({ error: 'Not found' }, { status: 404 })

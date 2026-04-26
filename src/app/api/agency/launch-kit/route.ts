@@ -1,6 +1,7 @@
 // Launch Library — ready-to-ship launch day kits for Product Hunt, Show HN,
 // Indie Hackers, BetaList. Each kit returns a coordinated pack of assets + timing.
 import { createClient } from '@/lib/supabase/server'
+import { checkBudget, budgetExceededResponse } from '@/lib/budget-guard'
 import { generateObject } from 'ai'
 import { modelFor } from '@/lib/ai/models'
 import { z } from 'zod'
@@ -97,6 +98,9 @@ export async function POST(request: Request) {
 
   const { projectId, kit, hunterName, launchDate } = await request.json() as { projectId: string; kit: Kit; hunterName?: string; launchDate?: string }
   if (!projectId || !kit) return Response.json({ error: 'projectId and kit required' }, { status: 400 })
+
+  const budget = await checkBudget(supabase, projectId)
+  if (!budget.ok) return budgetExceededResponse(budget)
 
   const { data: project } = await supabase.from('projects').select('name, description, website, brand_voice').eq('id', projectId).maybeSingle()
   if (!project) return Response.json({ error: 'Not found' }, { status: 404 })

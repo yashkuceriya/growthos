@@ -6,6 +6,7 @@ import { generateJsonLd, jsonLdScriptTag } from '@/lib/ai/tools/schema-router'
 import { getPlaybook } from '@/lib/ai/playbooks/registry'
 import type { Vertical } from '@/lib/ai/intelligence/classifier'
 import { trackAICost } from '@/lib/cost-tracker'
+import { checkBudget, budgetExceededResponse } from '@/lib/budget-guard'
 
 // Have the LLM extract FAQ/HowTo/Article content from project context; we compose JSON-LD.
 const ContentSchema = z.object({
@@ -22,6 +23,9 @@ export async function POST(request: Request) {
 
   const { projectId, override } = await request.json()
   if (!projectId) return Response.json({ error: 'projectId required' }, { status: 400 })
+
+  const budget = await checkBudget(supabase, projectId)
+  if (!budget.ok) return budgetExceededResponse(budget)
 
   const { data: project } = await supabase.from('projects').select('name, description, website, brand_voice').eq('id', projectId).maybeSingle()
   if (!project) return Response.json({ error: 'Not found' }, { status: 404 })
