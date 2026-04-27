@@ -9,7 +9,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { createHash, randomBytes } from 'crypto'
 
-export type Scope = 'leads:write' | 'projects:ingest' | 'projects:read'
+export type Scope = 'leads:write' | 'projects:ingest' | 'projects:read' | 'webhooks:write'
 
 export interface ApiAuthSuccess {
   ok: true

@@ -49,6 +49,7 @@ const SCOPE_OPTIONS = [
   { value: 'leads:write', label: 'Write leads', hint: 'POST /api/v1/leads' },
   { value: 'projects:ingest', label: 'Trigger ingest', hint: 'POST /api/v1/projects/:id/ingest' },
   { value: 'projects:read', label: 'Read projects', hint: 'GET /api/v1/projects' },
+  { value: 'webhooks:write', label: 'Manage webhooks', hint: 'POST/DELETE /api/v1/webhooks' },
 ] as const
 
 interface ApiKeyRow {

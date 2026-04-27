@@ -11,6 +11,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { runIngest } from '@/lib/ai/intelligence/ingest'
 import { checkBudget } from '@/lib/budget-guard'
+import { emitEvent } from '@/lib/webhooks/dispatch'
 
 export const MAX_INGEST_ATTEMPTS = 3
 
@@ -121,6 +122,23 @@ export async function runIngestJob(
         updated_at: new Date().toISOString(),
       })
       .eq('id', claimed.id)
+
+    // Fire outbound webhook for any subscribed endpoint. emitEvent is
+    // no-throw — webhook plumbing problems must not unwind a successful
+    // ingest write.
+    await emitEvent({
+      supabase,
+      userId: claimed.user_id,
+      projectId: claimed.project_id,
+      eventType: 'ingest.completed',
+      payload: {
+        job_id: claimed.id,
+        project_id: claimed.project_id,
+        url: claimed.url,
+        brand,
+      },
+    })
+
     return { id: claimed.id, finalStatus: 'completed' }
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Ingest failed'
@@ -139,6 +157,22 @@ export async function runIngestJob(
           updated_at: new Date().toISOString(),
         })
         .eq('id', claimed.id)
+
+      await emitEvent({
+        supabase,
+        userId: claimed.user_id,
+        projectId: claimed.project_id,
+        eventType: 'ingest.failed',
+        payload: {
+          job_id: claimed.id,
+          project_id: claimed.project_id,
+          url: claimed.url,
+          error: msg,
+          attempts: claimed.attempts,
+          permanent,
+        },
+      })
+
       return { id: claimed.id, finalStatus: 'failed' }
     }
 

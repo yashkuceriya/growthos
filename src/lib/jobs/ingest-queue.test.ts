@@ -11,6 +11,9 @@ vi.mock('@/lib/ai/intelligence/ingest', () => ({
 vi.mock('@/lib/budget-guard', () => ({
   checkBudget: vi.fn(),
 }))
+vi.mock('@/lib/webhooks/dispatch', () => ({
+  emitEvent: vi.fn(async () => ({ created: 0 })),
+}))
 
 import { runIngestJob, recoverStuckJobs, MAX_INGEST_ATTEMPTS, STUCK_RUNNING_TIMEOUT_MS } from './ingest-queue'
 import type { IngestJob } from './ingest-queue'

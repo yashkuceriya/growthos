@@ -265,6 +265,17 @@ supabase/migrations/
   - **Ad Studio detail panel** (`/ad-studio`): button next to Generate Images. Inline `<video>` preview below the image stack.
 - The dispatcher's existing auto-attach (`lib/video/index.ts → attachVideoToParent`) writes `video_url` / `video_render_id` / `video_status` back to the parent row when the render completes — no extra wiring needed.
 
+## Outbound webhooks (Bundle S — migration 022)
+- **Why**: customers' servers want to react to GrowthOS events without polling. First two events shipped: `ingest.completed`, `ingest.failed` (fired from `lib/jobs/ingest-queue.ts → runIngestJob`).
+- **Tables** (migration 022): `webhook_endpoints` (url, plaintext secret, events[], active, consecutive_failures, project_id nullable for cross-project subscriptions). `webhook_deliveries` (event_payload jsonb, status pending|delivering|success|failed|exhausted, attempts, next_attempt_at for backoff scheduling, response_status/body for debugging).
+- **Signing** (`lib/webhooks/sign.ts`): HMAC-SHA256 over `${unix_seconds}.${rawBody}`, sent as `x-growthos-signature: t=<seconds>,v1=<hex>`. Replay window 5 min via `verifySignature({ ..., toleranceSeconds })`. `timingSafeEqual` for the comparison.
+- **Dispatcher** (`lib/webhooks/dispatch.ts`): `emitEvent()` fans an event out to every active endpoint subscribed to it (no-throw — webhook plumbing problems can't unwind a successful business write). `deliverWebhook()` claims atomically (conditional UPDATE on id/status/attempts), POSTs with 15s timeout, classifies outcome: 2xx → success (resets `consecutive_failures`); 4xx (except 408/429) → terminal failure; 5xx + 408/429 + network errors → retry with backoff [1m, 5m, 30m, 2h, 6h] up to `MAX_DELIVERY_ATTEMPTS=5`, then `exhausted`.
+- **Auto-disable**: endpoint flips `active=false` after `AUTO_DISABLE_THRESHOLD=20` consecutive failures so a broken receiver doesn't burn cron quota indefinitely.
+- **Stuck-job recovery**: `recoverStuckDeliveries()` sweeps any `delivering` row whose `updated_at` is older than 5 min back to `pending` (or `exhausted` if MAX hit). Same pattern as `recoverStuckJobs()` in the ingest queue.
+- **Cron** `/api/webhooks/dispatch-tick` runs every 1 min via `vercel.json` (short cadence so first attempt after enqueue lands fast). Batch-loads endpoints for the due deliveries to avoid N+1. Defers + skips deliveries whose endpoint was deleted (mark `exhausted`) or disabled (push `next_attempt_at` +1h).
+- **v1 CRUD**: `GET/POST /api/v1/webhooks` (list, create), `GET/DELETE /api/v1/webhooks/:id`. Scope `webhooks:write` (added to `lib/api-auth.ts → Scope` and the settings UI mint form). POST returns the plaintext `secret` exactly once — same pattern as the api-keys mint flow.
+- **Tests**: `sign.test.ts` (12 tests covering deterministic signing, replay window, malformed/tampered/wrong-secret rejection); `dispatch.test.ts` (12 tests covering 2xx/4xx/5xx/network/exhaustion paths, auto-disable, lost claim, signed headers, backoff schedule).
+
 ## Background ingest queue (Bundle R — migration 021)
 - **Why**: `POST /api/v1/projects/:id/ingest` ran the crawl + LLM extract synchronously, blocking the API caller for 30-90s. Default behavior is now **async**: enqueue a job, return `202 { status: 'queued', job_id, poll_url }`. Caller polls `GET /api/v1/jobs/:id` for status + result.
 - **Backwards-compat**: pass `{ sync: true }` (or `?sync=1`) to keep the synchronous round-trip — useful for first-run integrations.

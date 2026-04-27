@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/server'
 import { wrapHandler } from '@/lib/api-error'
 import { generateApiKey, type Scope } from '@/lib/api-auth'
 
-const VALID_SCOPES: Scope[] = ['leads:write', 'projects:ingest', 'projects:read']
+const VALID_SCOPES: Scope[] = ['leads:write', 'projects:ingest', 'projects:read', 'webhooks:write']
 
 async function handleGet() {
   const supabase = await createClient()
