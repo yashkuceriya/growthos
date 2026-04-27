@@ -265,6 +265,12 @@ supabase/migrations/
   - **Ad Studio detail panel** (`/ad-studio`): button next to Generate Images. Inline `<video>` preview below the image stack.
 - The dispatcher's existing auto-attach (`lib/video/index.ts → attachVideoToParent`) writes `video_url` / `video_render_id` / `video_status` back to the parent row when the render completes — no extra wiring needed.
 
+## Receiver SDK snippets (Bundle X — no migration)
+- New `<WebhookVerifySnippet />` component (`components/ui/webhook-verify-snippet.tsx`) — collapsible block with tabs for Node.js / Python / Go showing a self-contained `verifyGrowthOS(rawBody, header)` function for each language. Uses only stdlib (`crypto`, `hmac`, `crypto/hmac`); no GrowthOS-specific deps so customers can paste-and-go.
+- Each snippet implements the full algorithm: parse `t=...,v1=...`, reject timestamps outside the 5-min tolerance, HMAC-SHA256 over `${timestamp}.${rawBody}`, constant-time compare. Commentary at the bottom warns against body-parser middleware that mutates the bytes (signature is over the unparsed wire body).
+- Wired into the settings page in two places: the create-success block (so users see verification code right after they get their secret) and inside the expanded endpoint panel (so they can find it later when debugging).
+- Copy button per snippet, language-tab switcher.
+
 ## api-auth integration tests + lazy-builder bug fix (Bundle W — no migration)
 - **Bug**: `lib/api-auth.ts` line 97 had `void supabase.from('api_keys').update({...}).eq('id', ...)` which silently never fired. Supabase JS query builders are lazy — they only run the HTTP request when `.then()` is called (or you await). Prefixing with `void` discards the builder before any subscriber attaches, so `last_used_at` was *never* actually being updated since this code shipped. Fixed by replacing the `void` form with `.then(() => {}, () => {})` to subscribe explicitly while still being non-blocking.
 - **Tests**: extended `src/lib/api-auth.test.ts` with 11 new integration tests covering every branch of `authenticateApiKey`:

@@ -9,6 +9,7 @@ import { StatusPill } from '@/components/ui/status-pill'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { Key, Plug, User, Users as TeamIcon, CreditCard, Plus, Copy, Trash2, Share2, MessageCircle, Briefcase, Webhook, Power, ChevronDown, ChevronRight, Send, RefreshCw } from 'lucide-react'
+import { WebhookVerifySnippet } from '@/components/ui/webhook-verify-snippet'
 import { useProject } from '@/hooks/use-project'
 
 const SECTIONS = [
@@ -592,6 +593,9 @@ export default function SettingsPage() {
                   <div className="mt-3 text-[10px] text-slate-500">
                     Verify with HMAC-SHA256 over <code className="font-mono-data text-slate-400">{`${'${'}timestamp${'}'}.${'${'}rawBody${'}'}`}</code>. Header format: <code className="font-mono-data text-slate-400">x-growthos-signature: t=&lt;seconds&gt;,v1=&lt;hex&gt;</code>. Reject timestamps older than 5 min.
                   </div>
+                  <div className="mt-3">
+                    <WebhookVerifySnippet />
+                  </div>
                 </div>
               )}
 
@@ -658,7 +662,8 @@ export default function SettingsPage() {
                         </div>
 
                         {expanded && (
-                          <div className="mt-3 ml-5 border-t border-slate-800 pt-3">
+                          <div className="mt-3 ml-5 border-t border-slate-800 pt-3 space-y-3">
+                            <WebhookVerifySnippet />
                             <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Recent deliveries</div>
                             {whDeliveriesLoading === w.id ? (
                               <p className="text-xs text-slate-500">Loading…</p>
