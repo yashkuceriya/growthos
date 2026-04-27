@@ -15,12 +15,19 @@ export const runtime = 'nodejs'
 import { createServiceClient } from '@/lib/supabase/server'
 import { wrapHandler } from '@/lib/api-error'
 import { authenticateApiKey } from '@/lib/api-auth'
+import { withIdempotency } from '@/lib/idempotency'
 
 async function handlePost(request: Request) {
   const auth = await authenticateApiKey(request, 'leads:write')
   if (!auth.ok) return auth.response
 
-  const body = await request.json()
+  // Read raw body once — we need it for the idempotency hash and the
+  // handler's destructure, and request.json() can only be called once.
+  const bodyText = await request.text()
+  const body = (() => {
+    try { return bodyText ? JSON.parse(bodyText) : {} }
+    catch { return {} }
+  })()
   const {
     projectId, email, name, source, sourceId, metadata,
     campaignId, utm_source, utm_medium, utm_campaign, utm_content, utm_term,
@@ -35,64 +42,74 @@ async function handlePost(request: Request) {
 
   const supabase = createServiceClient()
 
-  // Ownership gate — must be a project owned by the API key holder
-  const { data: project } = await supabase
-    .from('projects')
-    .select('user_id')
-    .eq('id', projectId)
-    .maybeSingle()
+  return withIdempotency({
+    supabase,
+    apiKeyId: auth.keyId,
+    idempotencyKey: request.headers.get('idempotency-key'),
+    method: request.method,
+    path: new URL(request.url).pathname,
+    bodyText,
+    handler: async () => {
+      // Ownership gate — must be a project owned by the API key holder
+      const { data: project } = await supabase
+        .from('projects')
+        .select('user_id')
+        .eq('id', projectId)
+        .maybeSingle()
 
-  if (!project || project.user_id !== auth.userId) {
-    return Response.json({ error: 'Project not found or not accessible with this key' }, { status: 404 })
-  }
+      if (!project || project.user_id !== auth.userId) {
+        return Response.json({ error: 'Project not found or not accessible with this key' }, { status: 404 })
+      }
 
-  // Deduplicate by (project_id, email)
-  const { data: existing } = await supabase
-    .from('leads')
-    .select('id')
-    .eq('project_id', projectId)
-    .eq('email', email)
-    .maybeSingle()
+      // Deduplicate by (project_id, email)
+      const { data: existing } = await supabase
+        .from('leads')
+        .select('id')
+        .eq('project_id', projectId)
+        .eq('email', email)
+        .maybeSingle()
 
-  if (existing) {
-    await supabase.from('lead_events').insert({
-      lead_id: existing.id,
-      event_type: 'api_touch',
-      metadata: { source, api_key_id: auth.keyId, ...metadata },
-    })
-    return Response.json({ lead_id: existing.id, status: 'existing' })
-  }
+      if (existing) {
+        await supabase.from('lead_events').insert({
+          lead_id: existing.id,
+          event_type: 'api_touch',
+          metadata: { source, api_key_id: auth.keyId, ...metadata },
+        })
+        return Response.json({ lead_id: existing.id, status: 'existing' })
+      }
 
-  const { data: lead, error } = await supabase
-    .from('leads')
-    .insert({
-      user_id: auth.userId,
-      project_id: projectId,
-      email,
-      name: name || null,
-      source: source || 'api',
-      source_id: sourceId || null,
-      campaign_id: campaignId ?? null,
-      utm_source: utm_source ?? null,
-      utm_medium: utm_medium ?? null,
-      utm_campaign: utm_campaign ?? null,
-      utm_content: utm_content ?? null,
-      utm_term: utm_term ?? null,
-      metadata: { api_key_id: auth.keyId, ...(metadata || {}) },
-      score: 10,
-    })
-    .select('id')
-    .single()
+      const { data: lead, error } = await supabase
+        .from('leads')
+        .insert({
+          user_id: auth.userId,
+          project_id: projectId,
+          email,
+          name: name || null,
+          source: source || 'api',
+          source_id: sourceId || null,
+          campaign_id: campaignId ?? null,
+          utm_source: utm_source ?? null,
+          utm_medium: utm_medium ?? null,
+          utm_campaign: utm_campaign ?? null,
+          utm_content: utm_content ?? null,
+          utm_term: utm_term ?? null,
+          metadata: { api_key_id: auth.keyId, ...(metadata || {}) },
+          score: 10,
+        })
+        .select('id')
+        .single()
 
-  if (error) return Response.json({ error: error.message }, { status: 500 })
+      if (error) return Response.json({ error: error.message }, { status: 500 })
 
-  await supabase.from('lead_events').insert({
-    lead_id: lead.id,
-    event_type: 'captured',
-    metadata: { source, api_key_id: auth.keyId, ...metadata },
+      await supabase.from('lead_events').insert({
+        lead_id: lead.id,
+        event_type: 'captured',
+        metadata: { source, api_key_id: auth.keyId, ...metadata },
+      })
+
+      return Response.json({ lead_id: lead.id, status: 'new' })
+    },
   })
-
-  return Response.json({ lead_id: lead.id, status: 'new' })
 }
 
 export const POST = wrapHandler(handlePost, 'v1/leads')

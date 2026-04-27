@@ -265,6 +265,19 @@ supabase/migrations/
   - **Ad Studio detail panel** (`/ad-studio`): button next to Generate Images. Inline `<video>` preview below the image stack.
 - The dispatcher's existing auto-attach (`lib/video/index.ts → attachVideoToParent`) writes `video_url` / `video_render_id` / `video_status` back to the parent row when the render completes — no extra wiring needed.
 
+## Idempotency keys for v1 (Bundle Y — migration 023)
+- **Why**: customer worker queues retry on transient failure. Without idempotency, a network blip on the response would cause the next retry to enqueue a second ingest job, create a duplicate webhook, etc. Now the API is safe to retry.
+- **Header**: `Idempotency-Key: <client-generated-uuid>`. Opt-in — clients that don't set it get the old behavior.
+- **Wired into**: `POST /api/v1/projects/:id/ingest`, `POST /api/v1/leads`, `POST /api/v1/webhooks`. Each route reads `request.text()` once (we can't `request.json()` twice), hashes it for the idempotency key, then passes through to a handler closure that does the actual work.
+- **Replay**: cached response returns byte-for-byte identical body + status + `Idempotent-Replayed: true` header (so clients can tell). 24h TTL via `created_at` filter — no cron sweep needed.
+- **Race-safe claim**: `INSERT` (not upsert) — the unique constraint on `(api_key_id, key)` kills parallel claims atomically. The losing writer detects SQLSTATE `23505` and re-fetches the winner's row instead of running the handler. Confirmed test coverage: `replays winner response when our INSERT loses to 23505`. Without this, two truly-concurrent retries would both win the upsert and both run the handler — defeating the whole point.
+- **Body hash includes method + path**: same key reused on a different endpoint → 422 (loud client error rather than silent collision).
+- **Stale claim recovery**: a `processing` row older than 60s is purged before the next retry's INSERT — covers crashed handlers without locking the key for 24h.
+- **Failure rollback**: if the handler throws, the `processing` claim is DELETEd so the retry can re-execute. Without this, a transient bug would lock the key.
+- **Body cap**: responses larger than 100KB bypass the cache (we still serve the response, just not idempotently). Larger than anything our v1 routes emit.
+- **Migration 023** adds `idempotency_records (api_key_id, key, request_hash, status, response_status, response_body, created_at, completed_at)` with composite PK `(api_key_id, key)`. No RLS — only the service role touches it, and `api_key_id` already gates ownership.
+- **Tests**: 18 cases in `src/lib/idempotency.test.ts` covering the matrix: no-key bypass, cold-cache happy path, body-cap, replay, body-mismatch (422), endpoint-mismatch (422), in-flight (409), stale-purge, handler-throws-cleanup, race-lost-replay, race-lost-409, generic-DB-error degradation, hash determinism + method/path/body sensitivity.
+
 ## Receiver SDK snippets (Bundle X — no migration)
 - New `<WebhookVerifySnippet />` component (`components/ui/webhook-verify-snippet.tsx`) — collapsible block with tabs for Node.js / Python / Go showing a self-contained `verifyGrowthOS(rawBody, header)` function for each language. Uses only stdlib (`crypto`, `hmac`, `crypto/hmac`); no GrowthOS-specific deps so customers can paste-and-go.
 - Each snippet implements the full algorithm: parse `t=...,v1=...`, reject timestamps outside the 5-min tolerance, HMAC-SHA256 over `${timestamp}.${rawBody}`, constant-time compare. Commentary at the bottom warns against body-parser middleware that mutates the bytes (signature is over the unparsed wire body).

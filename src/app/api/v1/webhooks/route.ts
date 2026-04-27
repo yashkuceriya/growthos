@@ -16,6 +16,7 @@ import { wrapHandler } from '@/lib/api-error'
 import { authenticateApiKey } from '@/lib/api-auth'
 import { generateWebhookSecret } from '@/lib/webhooks/sign'
 import { SUPPORTED_EVENTS, isSupportedEvent } from '@/lib/webhooks/events'
+import { withIdempotency } from '@/lib/idempotency'
 
 function isHttpsUrl(s: string): boolean {
   try {
@@ -44,11 +45,12 @@ async function handlePost(request: Request) {
   const auth = await authenticateApiKey(request, 'webhooks:write')
   if (!auth.ok) return auth.response
 
-  const body = await request.json().catch(() => ({})) as {
-    url?: string
-    events?: string[]
-    project_id?: string | null
-  }
+  // Read raw body once for idempotency hashing + handler use.
+  const bodyText = await request.text()
+  const body = (() => {
+    try { return bodyText ? JSON.parse(bodyText) as { url?: string; events?: string[]; project_id?: string | null } : {} }
+    catch { return {} }
+  })()
 
   if (!body.url || !isHttpsUrl(body.url)) {
     return Response.json({ error: 'Valid url required' }, { status: 400 })
@@ -65,51 +67,64 @@ async function handlePost(request: Request) {
 
   const supabase = createServiceClient()
 
-  // If project_id is provided, confirm the caller's user actually owns it.
-  // null = subscribe across all the user's projects.
-  let projectId: string | null = null
-  if (body.project_id) {
-    const { data: p } = await supabase
-      .from('projects')
-      .select('id, user_id')
-      .eq('id', body.project_id)
-      .maybeSingle() as { data: { id: string; user_id: string } | null }
-    if (!p || p.user_id !== auth.userId) {
-      return Response.json({ error: 'project_id not accessible with this key' }, { status: 404 })
-    }
-    projectId = p.id
-  }
+  return withIdempotency({
+    supabase,
+    apiKeyId: auth.keyId,
+    idempotencyKey: request.headers.get('idempotency-key'),
+    method: request.method,
+    path: new URL(request.url).pathname,
+    bodyText,
+    handler: async () => {
+      // If project_id is provided, confirm the caller's user actually owns it.
+      // null = subscribe across all the user's projects.
+      let projectId: string | null = null
+      if (body.project_id) {
+        const { data: p } = await supabase
+          .from('projects')
+          .select('id, user_id')
+          .eq('id', body.project_id)
+          .maybeSingle() as { data: { id: string; user_id: string } | null }
+        if (!p || p.user_id !== auth.userId) {
+          return Response.json({ error: 'project_id not accessible with this key' }, { status: 404 })
+        }
+        projectId = p.id
+      }
 
-  const secret = generateWebhookSecret()
+      const secret = generateWebhookSecret()
 
-  const { data, error } = await supabase
-    .from('webhook_endpoints')
-    .insert({
-      user_id: auth.userId,
-      project_id: projectId,
-      url: body.url,
-      secret,
-      events,
-      active: true,
-    })
-    .select('id, project_id, url, events, active, created_at')
-    .single() as { data: { id: string; project_id: string | null; url: string; events: string[]; active: boolean; created_at: string } | null; error: { message: string } | null }
+      const { data, error } = await supabase
+        .from('webhook_endpoints')
+        .insert({
+          user_id: auth.userId,
+          project_id: projectId,
+          url: body.url,
+          secret,
+          events,
+          active: true,
+        })
+        .select('id, project_id, url, events, active, created_at')
+        .single() as { data: { id: string; project_id: string | null; url: string; events: string[]; active: boolean; created_at: string } | null; error: { message: string } | null }
 
-  if (error || !data) {
-    return Response.json({ error: error?.message ?? 'Failed to create endpoint' }, { status: 500 })
-  }
+      if (error || !data) {
+        return Response.json({ error: error?.message ?? 'Failed to create endpoint' }, { status: 500 })
+      }
 
-  // Plaintext secret is returned exactly once — same shape as the api_keys
-  // mint flow.
-  return Response.json(
-    {
-      endpoint: data,
-      secret,
-      signature_format: 't=<unix-seconds>,v1=<hex-hmac-sha256>',
-      note: 'Save the secret now — it cannot be retrieved later via this endpoint.',
+      // Plaintext secret is returned exactly once — same shape as the
+      // api_keys mint flow. Idempotent replay returns the same secret
+      // because the cached body contains it; that's intentional, since
+      // the customer's retry should be able to recover from a network
+      // blip without re-rolling and losing the secret.
+      return Response.json(
+        {
+          endpoint: data,
+          secret,
+          signature_format: 't=<unix-seconds>,v1=<hex-hmac-sha256>',
+          note: 'Save the secret now — it cannot be retrieved later via this endpoint.',
+        },
+        { status: 201 },
+      )
     },
-    { status: 201 },
-  )
+  })
 }
 
 export const GET = wrapHandler(handleGet, 'v1/webhooks')
