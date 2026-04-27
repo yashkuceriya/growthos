@@ -8,27 +8,29 @@ import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { Key, Plug, User, Users as TeamIcon, CreditCard, Plus, Copy, Trash2, Share2, MessageCircle, Briefcase, Webhook, Power, ChevronDown, ChevronRight, Send, RefreshCw } from 'lucide-react'
+import { Key, Plug, User, Users as TeamIcon, CreditCard, Plus, Copy, Trash2, Share2, MessageCircle, Briefcase, Webhook, Power, ChevronDown, ChevronRight, Send, RefreshCw, BookOpen } from 'lucide-react'
 import { WebhookVerifySnippet } from '@/components/ui/webhook-verify-snippet'
+import { WEBHOOK_EVENTS } from '@/lib/webhooks/events'
+import { ApiReference } from '@/components/ui/api-reference'
 import { useProject } from '@/hooks/use-project'
 
 const SECTIONS = [
   { key: 'profile', label: 'Profile', icon: User },
   { key: 'api-keys', label: 'API Keys', icon: Key },
   { key: 'webhooks', label: 'Webhooks', icon: Webhook },
+  { key: 'api-reference', label: 'API Reference', icon: BookOpen },
   { key: 'social-accounts', label: 'Social Accounts', icon: Share2 },
   { key: 'integrations', label: 'Integrations', icon: Plug },
   { key: 'team', label: 'Team', icon: TeamIcon },
   { key: 'billing', label: 'Billing', icon: CreditCard },
 ] as const
 
-const WEBHOOK_EVENT_OPTIONS = [
-  { value: 'ingest.completed', label: 'Ingest completed', hint: 'Project crawl finished — payload includes brand info' },
-  { value: 'ingest.failed', label: 'Ingest failed', hint: 'Crawl gave up after retries — payload includes error reason' },
-  { value: 'lead.created', label: 'Lead created', hint: 'New lead captured — payload includes email, source, UTM fields' },
-  { value: 'social.published', label: 'Social published', hint: 'Post went live on a platform — payload includes external_url' },
-  { value: 'email.bounced', label: 'Email bounced', hint: 'Resend returned a bounce — payload includes send_id and subscriber_id' },
-] as const
+// Derived from the webhook events registry (single source of truth).
+const WEBHOOK_EVENT_OPTIONS = WEBHOOK_EVENTS.map((e) => ({
+  value: e.name,
+  label: e.label,
+  hint: e.hint,
+}))
 
 const SOCIAL_PLATFORMS = [
   { value: 'twitter', label: 'Twitter / X', icon: MessageCircle, hint: 'OAuth 2.0 user access token with tweet.write scope' },
@@ -389,6 +391,12 @@ export default function SettingsPage() {
 
         <div className="col-span-9">
           {section === 'api-keys' && (
+            <>
+              <div className="mb-3 flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/40 px-3 py-2 text-[11px] text-slate-400">
+                <BookOpen className="h-3 w-3 text-emerald-400" />
+                <span>Each scope maps to specific endpoints.</span>
+                <button onClick={() => setSection('api-reference')} className="ml-auto font-semibold text-emerald-300 hover:text-emerald-200">View API Reference →</button>
+              </div>
             <SectionPanel
               title="Personal API Keys"
               action={
@@ -509,9 +517,16 @@ export default function SettingsPage() {
                 </ul>
               )}
             </SectionPanel>
+            </>
           )}
 
           {section === 'webhooks' && (
+            <>
+              <div className="mb-3 flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/40 px-3 py-2 text-[11px] text-slate-400">
+                <BookOpen className="h-3 w-3 text-emerald-400" />
+                <span>Event payload schemas + endpoint docs live in the API Reference.</span>
+                <button onClick={() => setSection('api-reference')} className="ml-auto font-semibold text-emerald-300 hover:text-emerald-200">View API Reference →</button>
+              </div>
             <SectionPanel
               title="Outbound Webhooks"
               action={
@@ -710,6 +725,7 @@ export default function SettingsPage() {
                 </ul>
               )}
             </SectionPanel>
+            </>
           )}
 
           {section === 'social-accounts' && (
@@ -819,7 +835,13 @@ export default function SettingsPage() {
             </SectionPanel>
           )}
 
-          {section !== 'api-keys' && section !== 'integrations' && section !== 'social-accounts' && section !== 'webhooks' && (
+          {section === 'api-reference' && (
+            <SectionPanel title="API Reference">
+              <ApiReference />
+            </SectionPanel>
+          )}
+
+          {section !== 'api-keys' && section !== 'integrations' && section !== 'social-accounts' && section !== 'webhooks' && section !== 'api-reference' && (
             <SectionPanel title={SECTIONS.find((s) => s.key === section)?.label}>
               <p className="text-sm text-slate-500">Coming soon.</p>
             </SectionPanel>

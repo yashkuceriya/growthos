@@ -265,6 +265,15 @@ supabase/migrations/
   - **Ad Studio detail panel** (`/ad-studio`): button next to Generate Images. Inline `<video>` preview below the image stack.
 - The dispatcher's existing auto-attach (`lib/video/index.ts → attachVideoToParent`) writes `video_url` / `video_render_id` / `video_status` back to the parent row when the render completes — no extra wiring needed.
 
+## Coherent API surface — registries + reference page (Bundle Z — no migration)
+- **Why**: the system was functional but had drift risk. `WEBHOOK_EVENT_OPTIONS` in the settings UI was a hand-written copy of `SUPPORTED_EVENTS`, payload schemas in `lib/webhooks/payloads.ts` were invisible to customers, and there was no API reference at all — customers had to read source to learn scopes/idempotency/payload shapes. Now everything's a derivative of two registries.
+- **`lib/webhooks/events.ts` is now a rich registry**: each event has `name, label, hint, source, payload[]`. The settings UI's create-form picker derives from it directly (`Object.values(WEBHOOK_EVENTS)` → checkbox list). Adding a new event = one entry here + the producer-side `emitEvent` call.
+- **`lib/api-registry.ts` is the new endpoint registry**: each `ApiEndpointDef` carries method, path, scope, idempotent flag, success status, request/response schemas, notes. Eight v1 endpoints catalogued. Adding a new endpoint = one entry here.
+- **`/settings` → API Reference tab** (`components/ui/api-reference.tsx`): renders the two registries — quick-start curl example + auth/idempotency primer at the top, then endpoints grouped by resource, then the webhook events catalog. Pure derivative — no hand-written endpoint docs.
+- **Cross-links from API Keys + Webhooks tabs** to the new tab so customers find docs without searching.
+- **Visual conventions in the docs page**: method-tinted pills (POST=green, GET=blue, PATCH=amber, DELETE=neutral), Lock icon next to scope, RefreshCcw icon next to Idempotent flag, success-status arrow at the right.
+- The `isSupportedEvent` type predicate was simplified to `(s: string) => boolean` since no caller relied on the narrowed `SupportedEvent` brand. All caller filters explicitly type as `string`.
+
 ## Idempotency keys for v1 (Bundle Y — migration 023)
 - **Why**: customer worker queues retry on transient failure. Without idempotency, a network blip on the response would cause the next retry to enqueue a second ingest job, create a duplicate webhook, etc. Now the API is safe to retry.
 - **Header**: `Idempotency-Key: <client-generated-uuid>`. Opt-in — clients that don't set it get the old behavior.
