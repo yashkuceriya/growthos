@@ -93,8 +93,17 @@ export async function authenticateApiKey(
     }
   }
 
-  // Touch last_used_at async; don't block on it
-  void supabase.from('api_keys').update({ last_used_at: new Date().toISOString() }).eq('id', key.id)
+  // Touch last_used_at without blocking the auth response. Supabase
+  // builders are lazy — they only fire the HTTP request when `.then()` is
+  // called (or the value is awaited). A bare `void builder.eq(...)` looks
+  // fire-and-forget but actually discards the builder before it runs, so
+  // we explicitly subscribe with a no-op then() to trigger the request and
+  // swallow errors.
+  supabase
+    .from('api_keys')
+    .update({ last_used_at: new Date().toISOString() })
+    .eq('id', key.id)
+    .then(() => {}, () => {})
 
   return {
     ok: true,

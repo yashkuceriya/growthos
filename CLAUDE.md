@@ -265,6 +265,16 @@ supabase/migrations/
   - **Ad Studio detail panel** (`/ad-studio`): button next to Generate Images. Inline `<video>` preview below the image stack.
 - The dispatcher's existing auto-attach (`lib/video/index.ts → attachVideoToParent`) writes `video_url` / `video_render_id` / `video_status` back to the parent row when the render completes — no extra wiring needed.
 
+## api-auth integration tests + lazy-builder bug fix (Bundle W — no migration)
+- **Bug**: `lib/api-auth.ts` line 97 had `void supabase.from('api_keys').update({...}).eq('id', ...)` which silently never fired. Supabase JS query builders are lazy — they only run the HTTP request when `.then()` is called (or you await). Prefixing with `void` discards the builder before any subscriber attaches, so `last_used_at` was *never* actually being updated since this code shipped. Fixed by replacing the `void` form with `.then(() => {}, () => {})` to subscribe explicitly while still being non-blocking.
+- **Tests**: extended `src/lib/api-auth.test.ts` with 11 new integration tests covering every branch of `authenticateApiKey`:
+  - header-shape rejections (missing header, missing Bearer prefix, wrong token prefix)
+  - DB-backed rejections (key not found, revoked, expired)
+  - acceptance edges (future expires_at, null expires_at)
+  - scope gate (missing scope returns 403, present scope alongside others returns ok)
+  - side effect: `last_used_at` is touched on success but not on failure
+- The Supabase client is mocked at the module level via `vi.mock('@/lib/supabase/server', …)`. Each test seeds an in-memory `keyRow` and tracks `update` calls so the side-effect tests can assert without needing a real DB.
+
 ## Webhook test + redrive (Bundle V — no migration)
 - **Send test event**: per-endpoint button (paper-plane icon) on the settings page. POSTs `/api/webhook-endpoints/:id/test` which inserts a `test.ping` delivery row and drives it through `deliverWebhook` synchronously, returning the HTTP outcome to the caller. Result toast tells the user instantly whether their receiver acked (2xx → success, 5xx → pending/will-retry, 4xx → failed). The test row shows up in the deliveries panel just like real events.
 - **Retry now**: per-delivery button on `failed` and `exhausted` rows (refresh icon). POSTs `/api/webhook-endpoints/:id/deliveries/:deliveryId/redrive` which conditionally resets the row to `status='pending', attempts=0, error=null, next_attempt_at=now` (conditional UPDATE on status — race-safe vs the cron) then dispatches synchronously. Refuses to redrive `success` (idempotency) or `pending`/`delivering` (already in flight).
