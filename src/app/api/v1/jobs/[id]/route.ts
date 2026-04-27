@@ -13,6 +13,7 @@ export const runtime = 'nodejs'
 import { createServiceClient } from '@/lib/supabase/server'
 import { wrapHandler } from '@/lib/api-error'
 import { authenticateApiKey } from '@/lib/api-auth'
+import { enforceRateLimit, attachRateLimitHeaders } from '@/lib/rate-limit-api'
 
 async function handleGet(request: Request) {
   const auth = await authenticateApiKey(request, 'projects:ingest')
@@ -24,6 +25,8 @@ async function handleGet(request: Request) {
   if (!jobId) return Response.json({ error: 'Missing job id' }, { status: 400 })
 
   const supabase = createServiceClient()
+  const rl = await enforceRateLimit(supabase, auth.keyId)
+  if (!rl.ok) return rl.response
   const { data: job } = await supabase
     .from('ingest_jobs')
     .select('id, user_id, project_id, url, status, attempts, error, result, started_at, completed_at, created_at')
@@ -48,18 +51,21 @@ async function handleGet(request: Request) {
     return Response.json({ error: 'Job not found or not accessible with this key' }, { status: 404 })
   }
 
-  return Response.json({
-    id: job.id,
-    project_id: job.project_id,
-    url: job.url,
-    status: job.status,
-    attempts: job.attempts,
-    error: job.error,
-    result: job.result,
-    started_at: job.started_at,
-    completed_at: job.completed_at,
-    created_at: job.created_at,
-  })
+  return attachRateLimitHeaders(
+    Response.json({
+      id: job.id,
+      project_id: job.project_id,
+      url: job.url,
+      status: job.status,
+      attempts: job.attempts,
+      error: job.error,
+      result: job.result,
+      started_at: job.started_at,
+      completed_at: job.completed_at,
+      created_at: job.created_at,
+    }),
+    rl,
+  )
 }
 
 export const GET = wrapHandler(handleGet, 'v1/jobs/:id')

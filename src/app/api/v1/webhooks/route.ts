@@ -17,6 +17,7 @@ import { authenticateApiKey } from '@/lib/api-auth'
 import { generateWebhookSecret } from '@/lib/webhooks/sign'
 import { SUPPORTED_EVENTS, isSupportedEvent } from '@/lib/webhooks/events'
 import { withIdempotency } from '@/lib/idempotency'
+import { enforceRateLimit, attachRateLimitHeaders } from '@/lib/rate-limit-api'
 
 function isHttpsUrl(s: string): boolean {
   try {
@@ -32,18 +33,25 @@ async function handleGet(request: Request) {
   if (!auth.ok) return auth.response
 
   const supabase = createServiceClient()
+  const rl = await enforceRateLimit(supabase, auth.keyId)
+  if (!rl.ok) return rl.response
+
   const { data } = await supabase
     .from('webhook_endpoints')
     .select('id, project_id, url, events, active, consecutive_failures, last_delivery_at, last_delivery_status, created_at')
     .eq('user_id', auth.userId)
     .order('created_at', { ascending: false })
 
-  return Response.json({ endpoints: data ?? [] })
+  return attachRateLimitHeaders(Response.json({ endpoints: data ?? [] }), rl)
 }
 
 async function handlePost(request: Request) {
   const auth = await authenticateApiKey(request, 'webhooks:write')
   if (!auth.ok) return auth.response
+
+  const supabaseRl = createServiceClient()
+  const rl = await enforceRateLimit(supabaseRl, auth.keyId)
+  if (!rl.ok) return rl.response
 
   // Read raw body once for idempotency hashing + handler use.
   const bodyText = await request.text()
@@ -67,7 +75,7 @@ async function handlePost(request: Request) {
 
   const supabase = createServiceClient()
 
-  return withIdempotency({
+  const out = await withIdempotency({
     supabase,
     apiKeyId: auth.keyId,
     idempotencyKey: request.headers.get('idempotency-key'),
@@ -125,6 +133,8 @@ async function handlePost(request: Request) {
       )
     },
   })
+
+  return attachRateLimitHeaders(out, rl)
 }
 
 export const GET = wrapHandler(handleGet, 'v1/webhooks')

@@ -16,10 +16,15 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { wrapHandler } from '@/lib/api-error'
 import { authenticateApiKey } from '@/lib/api-auth'
 import { withIdempotency } from '@/lib/idempotency'
+import { enforceRateLimit, attachRateLimitHeaders } from '@/lib/rate-limit-api'
 
 async function handlePost(request: Request) {
   const auth = await authenticateApiKey(request, 'leads:write')
   if (!auth.ok) return auth.response
+
+  const supabaseRl = createServiceClient()
+  const rl = await enforceRateLimit(supabaseRl, auth.keyId)
+  if (!rl.ok) return rl.response
 
   // Read raw body once — we need it for the idempotency hash and the
   // handler's destructure, and request.json() can only be called once.
@@ -42,7 +47,7 @@ async function handlePost(request: Request) {
 
   const supabase = createServiceClient()
 
-  return withIdempotency({
+  const out = await withIdempotency({
     supabase,
     apiKeyId: auth.keyId,
     idempotencyKey: request.headers.get('idempotency-key'),
@@ -110,6 +115,8 @@ async function handlePost(request: Request) {
       return Response.json({ lead_id: lead.id, status: 'new' })
     },
   })
+
+  return attachRateLimitHeaders(out, rl)
 }
 
 export const POST = wrapHandler(handlePost, 'v1/leads')

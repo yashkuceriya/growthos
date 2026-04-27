@@ -265,6 +265,19 @@ supabase/migrations/
   - **Ad Studio detail panel** (`/ad-studio`): button next to Generate Images. Inline `<video>` preview below the image stack.
 - The dispatcher's existing auto-attach (`lib/video/index.ts → attachVideoToParent`) writes `video_url` / `video_render_id` / `video_status` back to the parent row when the render completes — no extra wiring needed.
 
+## Per-API-key rate limits (Bundle AA — migration 024)
+- **Why**: a runaway client integration could otherwise burn budgets and overwhelm the queue. Now every v1 endpoint consumes one token from a per-key bucket; bursts are capped, sustained throughput has a clear ceiling, and the customer's own client gets headers so they can self-throttle.
+- **Algorithm**: token bucket. Default burst 60, refill 1 tok/sec → sustained 60 req/min, allowing brief spikes up to 60 in a burst. Override via env vars `API_RATE_LIMIT_BURST` / `API_RATE_LIMIT_RATE` without redeploying.
+- **Storage** (migration 024): `api_key_rate_limits (api_key_id PK, tokens_remaining float8, last_refill_at timestamptz)`. The bucket math runs in a Postgres function `consume_rate_token(key, burst, rate)` — single `INSERT ... ON CONFLICT DO UPDATE WHERE` that does refill + decrement atomically. Concurrent requests from the same key serialize on the row lock — no double-spend window.
+- **Library** `lib/rate-limit-api.ts`: `enforceRateLimit(supabase, apiKeyId, options?)` returns `{ ok: true, remaining, headers }` or `{ ok: false, response }` (pre-built 429). `attachRateLimitHeaders(response, outcome)` mutates the success response with the `x-ratelimit-*` headers.
+- **Fail-open**: if the RPC errors (DB hiccup, permission glitch), the request is ALLOWED and the failure is logged. Bad rate-limit infra must never block customer traffic.
+- **Headers** (Stripe-style):
+  - On 2xx: `x-ratelimit-limit`, `x-ratelimit-remaining`, `x-ratelimit-reset` (unix seconds)
+  - On 429: same three plus `retry-after` (seconds)
+- **Wired into all 8 v1 endpoints**: ingest POST, projects GET, leads POST, jobs GET, webhooks GET/POST, webhooks/:id GET/DELETE. Each does `authenticateApiKey` → `enforceRateLimit` → handler. Idempotent replays still consume a token (a retry storm should signal back to the customer that they have a config issue).
+- **Tests**: 8 cases covering allowed, 0-remaining, denied, custom rate, fail-open, header attach for ok/denied/fail-open outcomes.
+- API Reference page in `/settings` was updated to describe the rate-limit contract so customers can see the headers they should expect.
+
 ## Coherent API surface — registries + reference page (Bundle Z — no migration)
 - **Why**: the system was functional but had drift risk. `WEBHOOK_EVENT_OPTIONS` in the settings UI was a hand-written copy of `SUPPORTED_EVENTS`, payload schemas in `lib/webhooks/payloads.ts` were invisible to customers, and there was no API reference at all — customers had to read source to learn scopes/idempotency/payload shapes. Now everything's a derivative of two registries.
 - **`lib/webhooks/events.ts` is now a rich registry**: each event has `name, label, hint, source, payload[]`. The settings UI's create-form picker derives from it directly (`Object.values(WEBHOOK_EVENTS)` → checkbox list). Adding a new event = one entry here + the producer-side `emitEvent` call.

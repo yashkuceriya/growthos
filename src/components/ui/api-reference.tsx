@@ -109,6 +109,14 @@ export function ApiReference() {
             <code className="font-mono-data text-emerald-300">Idempotent-Replayed: true</code> header. Reusing the same key
             with a different body returns 422.
           </p>
+          <p>
+            <strong className="text-slate-200">Rate limits</strong>: 60 requests / minute per API key (token bucket — burst
+            up to 60). Every response carries{' '}
+            <code className="font-mono-data text-emerald-300">x-ratelimit-limit</code>,{' '}
+            <code className="font-mono-data text-emerald-300">x-ratelimit-remaining</code>, and{' '}
+            <code className="font-mono-data text-emerald-300">x-ratelimit-reset</code> (unix seconds). On 429 you also get{' '}
+            <code className="font-mono-data text-emerald-300">retry-after</code> in seconds.
+          </p>
         </div>
       </section>
 

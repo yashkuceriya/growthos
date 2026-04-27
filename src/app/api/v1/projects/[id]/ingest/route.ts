@@ -32,10 +32,15 @@ import { checkBudget, budgetExceededResponse } from '@/lib/budget-guard'
 import { runIngest } from '@/lib/ai/intelligence/ingest'
 import { enqueueIngest } from '@/lib/jobs/ingest-queue'
 import { withIdempotency } from '@/lib/idempotency'
+import { enforceRateLimit, attachRateLimitHeaders } from '@/lib/rate-limit-api'
 
 async function handlePost(request: Request) {
   const auth = await authenticateApiKey(request, 'projects:ingest')
   if (!auth.ok) return auth.response
+
+  const supabaseRl = createServiceClient()
+  const rl = await enforceRateLimit(supabaseRl, auth.keyId)
+  if (!rl.ok) return rl.response
 
   const url = new URL(request.url)
   const parts = url.pathname.split('/').filter(Boolean)
@@ -54,7 +59,7 @@ async function handlePost(request: Request) {
 
   const supabase = createServiceClient()
 
-  return withIdempotency({
+  const out = await withIdempotency({
     supabase,
     apiKeyId: auth.keyId,
     idempotencyKey: request.headers.get('idempotency-key'),
@@ -119,6 +124,8 @@ async function handlePost(request: Request) {
       )
     },
   })
+
+  return attachRateLimitHeaders(out, rl)
 }
 
 export const POST = wrapHandler(handlePost, 'v1/projects/:id/ingest')

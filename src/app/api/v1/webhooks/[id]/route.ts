@@ -10,6 +10,7 @@ export const runtime = 'nodejs'
 import { createServiceClient } from '@/lib/supabase/server'
 import { wrapHandler } from '@/lib/api-error'
 import { authenticateApiKey } from '@/lib/api-auth'
+import { enforceRateLimit, attachRateLimitHeaders } from '@/lib/rate-limit-api'
 
 function endpointIdFromUrl(request: Request): string {
   const url = new URL(request.url)
@@ -25,6 +26,9 @@ async function handleGet(request: Request) {
   if (!id) return Response.json({ error: 'Missing endpoint id' }, { status: 400 })
 
   const supabase = createServiceClient()
+  const rl = await enforceRateLimit(supabase, auth.keyId)
+  if (!rl.ok) return rl.response
+
   const { data: endpoint } = await supabase
     .from('webhook_endpoints')
     .select('id, user_id, project_id, url, events, active, consecutive_failures, last_delivery_at, last_delivery_status, created_at, updated_at')
@@ -51,7 +55,7 @@ async function handleGet(request: Request) {
 
   // Strip user_id from the response — the caller already knows.
   const { user_id: _userId, ...publicFields } = endpoint
-  return Response.json({ endpoint: publicFields })
+  return attachRateLimitHeaders(Response.json({ endpoint: publicFields }), rl)
 }
 
 async function handleDelete(request: Request) {
@@ -62,6 +66,8 @@ async function handleDelete(request: Request) {
   if (!id) return Response.json({ error: 'Missing endpoint id' }, { status: 400 })
 
   const supabase = createServiceClient()
+  const rl = await enforceRateLimit(supabase, auth.keyId)
+  if (!rl.ok) return rl.response
 
   // Conditional delete by user_id — a key with webhooks:write on user A
   // cannot delete user B's endpoint even if it knew the id.
@@ -75,7 +81,7 @@ async function handleDelete(request: Request) {
 
   if (error) return Response.json({ error: error.message }, { status: 500 })
   if (!data) return Response.json({ error: 'Endpoint not found or not accessible with this key' }, { status: 404 })
-  return Response.json({ ok: true, id: data.id })
+  return attachRateLimitHeaders(Response.json({ ok: true, id: data.id }), rl)
 }
 
 export const GET = wrapHandler(handleGet, 'v1/webhooks/:id')
