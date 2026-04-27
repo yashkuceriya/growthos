@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/server'
 
 interface CostEntry {
   userId: string
@@ -13,10 +13,25 @@ interface CostEntry {
   metadata?: Record<string, unknown>
 }
 
+/**
+ * Append a row to ai_cost_ledger.
+ *
+ * **Why service client (not session client)**: trackAICost is called from
+ * cron-driven flows (lib/jobs/ingest-queue → runIngest, video poll-tick,
+ * launch generators when invoked from queue work, etc.) where there are
+ * no user cookies. createClient() in those contexts returns an anonymous
+ * client and RLS (`auth.uid() = user_id`) silently rejects the INSERT.
+ * Result: every cron-driven AI call's cost was being SILENTLY DROPPED
+ * from the ledger — dashboard "AI Spend" missed cron costs entirely.
+ *
+ * Service-client write is safe here: callers always have the user_id
+ * from auth-time, and ai_cost_ledger entries are write-only audit data.
+ * Read access is still RLS-gated for users so they only see their own.
+ */
 export async function trackAICost(entry: CostEntry) {
-  const supabase = await createClient()
+  const supabase = createServiceClient()
 
-  await supabase.from('ai_cost_ledger').insert({
+  const { error } = await supabase.from('ai_cost_ledger').insert({
     user_id: entry.userId,
     project_id: entry.projectId ?? null,
     module: entry.module,
@@ -28,6 +43,12 @@ export async function trackAICost(entry: CostEntry) {
     cost_usd: entry.costUsd ?? null,
     metadata: entry.metadata ?? {},
   })
+
+  if (error) {
+    // Don't throw — cost tracking is best-effort instrumentation, not a
+    // hard requirement. But log so operators see ledger problems.
+    console.error('[cost-tracker] ledger insert failed:', error.message)
+  }
 }
 
 // Rough cost estimates per 1M tokens (input/output), USD

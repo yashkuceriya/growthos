@@ -52,6 +52,48 @@ async function handlePost(request: Request) {
     return Response.json({ error: `Unknown model: ${body.modelId}` }, { status: 400 })
   }
 
+  // Cross-tenant gate: verify projectId belongs to this user. Without
+  // this check, any authed user could pin a render to any project's
+  // budget + (worse) inject the resulting video into another user's
+  // ad copy or social post via attachTo.
+  if (body.projectId) {
+    const { data: own } = await supabase
+      .from('projects')
+      .select('id')
+      .eq('id', body.projectId)
+      .maybeSingle()
+    if (!own) {
+      return Response.json({ error: 'Project not found or not accessible' }, { status: 404 })
+    }
+  }
+
+  // Cross-tenant gate: verify attachTo target belongs to this user too.
+  // RLS on the session client returns null for cross-user rows.
+  if (body.attachTo) {
+    const table = body.attachTo.type === 'ad_copy' ? 'ad_copies' : 'social_posts'
+    if (body.attachTo.type === 'ad_copy') {
+      // ad_copies don't carry user_id directly — they live under ad_briefs.
+      // RLS on ad_briefs scopes to user, so a join-via-eq does the gating.
+      const { data: own } = await supabase
+        .from('ad_copies')
+        .select('id, ad_briefs!inner(project_id)')
+        .eq('id', body.attachTo.id)
+        .maybeSingle()
+      if (!own) {
+        return Response.json({ error: 'attachTo target not accessible' }, { status: 404 })
+      }
+    } else {
+      const { data: own } = await supabase
+        .from(table)
+        .select('id')
+        .eq('id', body.attachTo.id)
+        .maybeSingle()
+      if (!own) {
+        return Response.json({ error: 'attachTo target not accessible' }, { status: 404 })
+      }
+    }
+  }
+
   // AI budget cap — script generation + video render both bill
   if (body.projectId) {
     const budget = await checkBudget(supabase, body.projectId)
