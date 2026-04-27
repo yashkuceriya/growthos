@@ -19,8 +19,15 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      # Use `npm install` rather than `npm ci`: the lockfile resolves
+      # differently across Node/npm versions for platform-specific
+      # transitive deps (notably @emnapi/* on Linux x64). `npm ci`
+      # treats that as fatal; `npm install` updates the lockfile in
+      # place. Vercel handles bit-exact production resolution from
+      # its own cache — CI here is for typecheck/lint/test gating, not
+      # for reproducible deploys.
       - name: Install
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       # Typecheck before lint/test — a TS failure is the most common
       # regression class and the cheapest to surface first.
