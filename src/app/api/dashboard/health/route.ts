@@ -56,11 +56,31 @@ async function handleGet(request: Request) {
   // since env vars are per-deployment, not per-project.
 
   const integrations = computeIntegrations()
-  const [activity, kpi, setup] = await Promise.all([
+  const [activity, kpi, setup, rpcHealth] = await Promise.all([
     fetchActivity(supabase, projectId),
     fetchKpi(supabase, user.id, projectId),
     projectId ? fetchSetupState(supabase, projectId) : Promise.resolve(null),
+    checkCriticalRpcs(supabase),
   ])
+
+  // Stitch DB-function presence into the integrations list so the user
+  // sees "migration 025 needed" surfaced visibly. Otherwise the failure
+  // mode is silent (rate limits / budget caps OFF without warning).
+  if (!rpcHealth.allPresent) {
+    integrations.unshift({
+      name: 'Database functions',
+      configured: false,
+      status: 'error',
+      detail: `Missing RPCs: ${rpcHealth.missing.join(', ')}. Apply supabase/migrations/025_rpc_redo.sql to repair.`,
+    })
+  } else {
+    integrations.push({
+      name: 'Database functions',
+      configured: true,
+      status: 'ok',
+      detail: 'All critical RPCs present (merge / spend / rate-token)',
+    })
+  }
 
   // Anchor "OpenRouter ok" to actual usage in the last 30 days.
   const openrouter = integrations.find((i) => i.name === 'OpenRouter')
@@ -80,6 +100,37 @@ async function handleGet(request: Request) {
   }
 
   return Response.json({ integrations, activity, kpi, setup })
+}
+
+/**
+ * Probe the three RPCs we depend on. A missing RPC = silent-failure mode
+ * (budget caps / rate limits / brand_voice merges all break invisibly).
+ * Surfacing this on the dashboard turns a hidden bug into a visible one.
+ */
+async function checkCriticalRpcs(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+): Promise<{ allPresent: boolean; missing: string[] }> {
+  const probes = [
+    { name: 'merge_project_brand_voice', call: () => supabase.rpc('merge_project_brand_voice', { p_project_id: '00000000-0000-0000-0000-000000000000', p_patch: {} }) },
+    { name: 'project_month_ai_spend', call: () => supabase.rpc('project_month_ai_spend', { p_project_id: '00000000-0000-0000-0000-000000000000' }) },
+    { name: 'consume_rate_token', call: () => supabase.rpc('consume_rate_token', { p_api_key_id: '00000000-0000-0000-0000-000000000000', p_burst: 60, p_rate: 1 }) },
+  ]
+  const missing: string[] = []
+  for (const { name, call } of probes) {
+    try {
+      const { error } = await call()
+      const msg = error?.message ?? ''
+      if (error && (error.code === 'PGRST202' || /could not find the function/i.test(msg) || /function .* does not exist/i.test(msg))) {
+        missing.push(name)
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      if (/could not find the function/i.test(msg) || /function .* does not exist/i.test(msg)) {
+        missing.push(name)
+      }
+    }
+  }
+  return { allPresent: missing.length === 0, missing }
 }
 
 async function fetchSetupState(

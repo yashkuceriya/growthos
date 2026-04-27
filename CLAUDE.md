@@ -265,6 +265,19 @@ supabase/migrations/
   - **Ad Studio detail panel** (`/ad-studio`): button next to Generate Images. Inline `<video>` preview below the image stack.
 - The dispatcher's existing auto-attach (`lib/video/index.ts → attachVideoToParent`) writes `video_url` / `video_render_id` / `video_status` back to the parent row when the render completes — no extra wiring needed.
 
+## Practical audit + missing-RPC repair (Bundle GG — migration 025)
+- **Why**: an audit done at the user's prompt — "make sure things actually work" — checked the live database and found three production RPCs missing despite the migrations being on disk and code calling them. Tables existed; functions didn't. Almost certainly because earlier migrations were partially pasted into Supabase Studio (CREATE TABLE only, not the trailing CREATE FUNCTION blocks). All three were silent-failure hazards:
+  - `merge_project_brand_voice` (mig 011) missing → every "Sync Site" + every agency agent threw 500. Bundle FF design tokens never persisted because the merge that stores them blew up.
+  - `project_month_ai_spend` (mig 012) missing → budget caps silently never triggered (spend always read as 0 because the destructured `data` from the RPC error path was null).
+  - `consume_rate_token` (mig 024) missing → rate limits silently failed-open.
+- **Migration 025** (`025_rpc_redo.sql`): re-applies all three RPCs idempotently (`create or replace`) plus `notify pgrst, 'reload schema'` so they're callable immediately. Apply once via Supabase Studio SQL editor (or `supabase db push` if the CLI is wired up). Safe to re-run.
+- **Code-level fallbacks** so the system works *even if* the migration isn't applied:
+  - `lib/brand-voice.ts → mergeBrandVoice`: if RPC errors with `PGRST202` / "could not find the function", falls back to read-modify-write. Race-prone (concurrent writers can lose writes — the bug 011 was meant to fix) but functional. One-time loud console.error tells the operator what to do. **Verified end-to-end**: tested against live Supabase with the RPC actually missing — fallback path stored + read back the patch correctly.
+  - `lib/budget-guard.ts → checkBudget`: if RPC errors, falls back to a direct `select sum(cost_usd) where created_at >= month_start`. Slower (no index optimization the RPC's `STABLE` declaration enables) but correct.
+  - `lib/rate-limit-api.ts → enforceRateLimit`: same loud-warn-once log when the RPC is missing. Still fails open since rate-limit infra problems should never block traffic, but the operator sees the cause.
+- **Visibility**: `/api/dashboard/health` now probes the three RPCs and prepends a `Database functions` integration row with `error` status when any are missing, listing them by name and pointing to migration 025. Operator sees this on every dashboard load — no more silent breakage.
+- **Why this matters**: the prior bundles (Y idempotency, AA rate limits, brand_voice merge in 011) all assumed their RPCs were live in production. The audit caught all three NOT live in this deployment, which means the tests + CI green were giving false confidence. Adding visibility + fallbacks means future migration drift becomes loud, not silent.
+
 ## Claude as art director — design tokens + model upgrades (Bundle FF — no migration)
 - **Why**: research surfaced two compounding gaps. (1) Default models were old: `gemini-2.0-flash-001` (year-old, more expensive than 2.5 for worse output) and `claude-sonnet-4-5`. (2) Ad images were grounded only on a free-text "brand context" string — the model had no concrete design system (hex codes, typography vibe, layout pattern) to anchor on, so ads tended to look like generic AI ads rather than the user's actual product.
 - **Model upgrades** (`lib/ai/models.ts`):

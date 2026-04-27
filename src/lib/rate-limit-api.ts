@@ -61,6 +61,10 @@ export interface RateLimitOptions {
  *   for (const [k, v] of Object.entries(rl.headers)) res.headers.set(k, v)
  *   return res
  */
+// Once-per-process flag so a missing RPC produces ONE loud log rather
+// than spamming on every request.
+let warnedAboutMissingRpc = false
+
 export async function enforceRateLimit(
   supabase: SupabaseClient,
   apiKeyId: string,
@@ -73,10 +77,23 @@ export async function enforceRateLimit(
     p_api_key_id: apiKeyId,
     p_burst: burst,
     p_rate: rate,
-  }) as { data: number | null; error: { message: string } | null }
+  }) as { data: number | null; error: { message: string; code?: string } | null }
 
   if (error) {
-    console.error('[rate-limit] RPC failed; failing open:', error.message)
+    const msg = error.message ?? ''
+    const isMissingRpc =
+      error.code === 'PGRST202'
+      || /could not find the function/i.test(msg)
+      || /function .* does not exist/i.test(msg)
+    if (isMissingRpc && !warnedAboutMissingRpc) {
+      console.error(
+        '[rate-limit] consume_rate_token RPC missing — apply supabase/migrations/025_rpc_redo.sql. '
+        + 'Rate limiting is currently OFF (failing open).',
+      )
+      warnedAboutMissingRpc = true
+    } else if (!isMissingRpc) {
+      console.error('[rate-limit] RPC failed; failing open:', msg)
+    }
     return { ok: true, remaining: -1, limit: burst, headers: {} }
   }
 
