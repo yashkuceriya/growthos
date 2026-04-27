@@ -10,6 +10,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { trackAICost, estimateCost } from '@/lib/cost-tracker'
 import { classifyProduct } from '@/lib/ai/intelligence/classifier'
 import { mergeBrandVoice } from '@/lib/brand-voice'
+import { captureScreenshot } from '@/lib/screenshots/capture'
 
 export const BrandSchema = z.object({
   tagline: z.string().describe('Primary tagline or H1 headline from the page'),
@@ -136,6 +137,24 @@ ${trimmed}`,
 
   const patch: Record<string, unknown> = { ...normalized }
   if (classification) patch.classification = classification
+
+  // Fresh-rendered screenshot — provider-dependent (no-op without env key).
+  // Stored on brand_voice so downstream content generation (ad images,
+  // landing pages) can use it as visual ground truth instead of relying
+  // on whatever marketing image was already in the page HTML.
+  try {
+    const shot = await captureScreenshot(supabase, userId, projectId, url)
+    if (shot) {
+      patch.captured_screenshot = {
+        url: shot.url,
+        mirrored: shot.mirrored,
+        captured_at: shot.capturedAt,
+      }
+    }
+  } catch (e) {
+    // Screenshot is enrichment, not a hard requirement. Log + continue.
+    console.error('[ingest] screenshot capture errored:', e instanceof Error ? e.message : e)
+  }
 
   await mergeBrandVoice(supabase, projectId, patch)
 

@@ -265,6 +265,16 @@ supabase/migrations/
   - **Ad Studio detail panel** (`/ad-studio`): button next to Generate Images. Inline `<video>` preview below the image stack.
 - The dispatcher's existing auto-attach (`lib/video/index.ts → attachVideoToParent`) writes `video_url` / `video_render_id` / `video_status` back to the parent row when the render completes — no extra wiring needed.
 
+## Real UI capture for content generation (Bundle CC — no migration)
+- **Why**: the existing ingest extracts images already embedded in the page HTML — curated marketing shots, sometimes outdated, often low-res. Capturing a fresh-rendered browser screenshot gives downstream content generation visual ground truth (especially the multimodal ad-image generator that already accepts a `referenceImageUrl`).
+- **`lib/screenshots/capture.ts`** — provider-agnostic shape with one concrete impl: ScreenshotOne. Set `SCREENSHOTONE_ACCESS_KEY` to enable. Without it, capture returns null and ingest continues — graceful no-op so dev environments without an account still work.
+- **Storage mirror** (mirrors `lib/video/storage.ts`): if `SCREENSHOT_STORAGE_BUCKET` is set, the captured PNG is uploaded to Supabase Storage at `<user_id>/<project_id>/<timestamp>.png` and the public URL is returned. Without the bucket, the upstream cached URL is used (24h TTL, may break content downstream — log a warning).
+- **Wired into `runIngest`**: every project sync now also captures the live UI. URL stored on `projects.brand_voice.captured_screenshot = { url, mirrored, captured_at }`. Failure here is logged but doesn't unwind the rest of ingest.
+- **Used as the top-priority reference image** in `/api/ai/generate-ad-image`: captured shot beats the marketing hero image beats embedded screenshots beats nothing. The multimodal Gemini Image model now anchors ad creatives on what the product actually looks like, not on stock-art-y page images.
+- **Visible on the project page**: each project card now shows a screenshot thumbnail at the top — captured shot if available, else the marketing hero, else a "Run Sync Site" placeholder. Visual confirmation that capture worked.
+- Capture defaults: 1440×900 viewport, full-page (scroll-and-stitch), 1.5s settle delay, ad/cookie-banner/tracker blocking on. Override per-call via `CaptureOptions`.
+- **Setup**: 1) sign up at screenshotone.com (free tier 50/mo), set `SCREENSHOTONE_ACCESS_KEY`. 2) create a public-read bucket `screenshots` in Supabase Storage, set `SCREENSHOT_STORAGE_BUCKET=screenshots`. Re-run "Sync Site" to backfill.
+
 ## Health endpoint + scope-free auth (Bundle BB — no migration)
 - New `GET /api/v1/health` — the first endpoint a new integration should hit. Returns `{ ok, server_time, key: { id, name, prefix, scopes, ... }, rate_limit: { limit, remaining } }` for any valid key.
 - **Why scope-free**: customers minting a new key may not remember which scopes they granted. Hitting health surfaces the actual scope list so they can see what their key allows. With required-scope auth, they'd have to know in advance.

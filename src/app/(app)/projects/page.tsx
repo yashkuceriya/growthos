@@ -105,9 +105,29 @@ export default function ProjectsPage() {
         <div className="grid grid-cols-3 gap-4">
           {projects.map((p) => {
             const active = activeProject?.id === p.id
+            const bv = (p.brand_voice as Record<string, unknown> | null) ?? {}
+            const captured = (bv.captured_screenshot as { url?: string; captured_at?: string } | undefined)
+            const screenshotUrl = captured?.url
+              ?? (bv.hero_image_url as string | null | undefined)
+              ?? (Array.isArray(bv.screenshots) ? (bv.screenshots as string[])[0] : null)
+              ?? null
             return (
-              <div key={p.id} className={cn('relative rounded-md border p-4', active ? 'border-emerald-500/40 bg-emerald-500/[0.03]' : 'border-slate-800 bg-slate-900/60')}>
+              <div key={p.id} className={cn('relative overflow-hidden rounded-md border', active ? 'border-emerald-500/40 bg-emerald-500/[0.03]' : 'border-slate-800 bg-slate-900/60')}>
                 {active && <span className="absolute left-0 top-3 bottom-3 w-[2px] rounded-r bg-emerald-400" />}
+                {screenshotUrl ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    src={screenshotUrl}
+                    alt={`${p.name} site screenshot`}
+                    className="h-32 w-full border-b border-slate-800 bg-slate-950 object-cover object-top"
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="flex h-32 w-full items-center justify-center border-b border-slate-800 bg-slate-950 text-[10px] text-slate-600">
+                    {p.website ? 'Run "Sync Site" to capture' : 'Add a website to capture'}
+                  </div>
+                )}
+                <div className="p-4">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-2">
                     <div className="flex h-8 w-8 items-center justify-center rounded-md bg-emerald-500/15 text-emerald-400">
@@ -142,6 +162,7 @@ export default function ProjectsPage() {
                     {syncingId === p.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
                     Sync Site
                   </button>
+                </div>
                 </div>
               </div>
             )

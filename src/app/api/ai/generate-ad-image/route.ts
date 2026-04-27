@@ -54,7 +54,13 @@ export async function POST(request: Request) {
 
   const brandContext = baseContext + modeBlock(brief.creative_mode, 'visual')
 
+  // Reference-image priority: a fresh-rendered captured screenshot beats
+  // the marketing-curated hero image, because the captured shot reflects
+  // the actual current UI. Falls back to hero, then to any embedded
+  // screenshot, then nothing.
+  const captured = (brandVoice.captured_screenshot as { url?: string } | undefined)?.url ?? null
   const referenceImageUrl: string | null =
+    captured ??
     (brandVoice.hero_image_url as string | null) ??
     (Array.isArray(brandVoice.screenshots) ? ((brandVoice.screenshots as string[])[0] ?? null) : null)
 
