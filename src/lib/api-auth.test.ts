@@ -211,6 +211,36 @@ describe('authenticateApiKey', () => {
     expect(body.error).toContain('leads:write')
   })
 
+  it('accepts any valid key when requiredScope is null (health-endpoint pattern)', async () => {
+    keyRow = {
+      id: 'k1',
+      user_id: 'u1',
+      scopes: ['projects:read'], // scope list is irrelevant for null
+      revoked_at: null,
+      expires_at: null,
+    }
+    const k = generateApiKey()
+    const result = await authenticateApiKey(makeRequest(`Bearer ${k.plaintext}`), null)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.scopes).toContain('projects:read')
+  })
+
+  it('still rejects revoked keys when requiredScope is null', async () => {
+    keyRow = {
+      id: 'k1',
+      user_id: 'u1',
+      scopes: ['projects:read'],
+      revoked_at: new Date(Date.now() - 60_000).toISOString(),
+      expires_at: null,
+    }
+    const k = generateApiKey()
+    const result = await authenticateApiKey(makeRequest(`Bearer ${k.plaintext}`), null)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.response.status).toBe(401)
+  })
+
   it('accepts when key has the required scope alongside others', async () => {
     keyRow = {
       id: 'k1',

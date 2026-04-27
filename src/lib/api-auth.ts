@@ -37,9 +37,16 @@ export function generateApiKey(): { plaintext: string; prefix: string; hash: str
   }
 }
 
+/**
+ * Authenticate an API key from a request's `Authorization: Bearer ...` header.
+ * Pass a `requiredScope` to gate the call (most routes do); pass `null` to
+ * accept any valid key regardless of scopes — used by the health endpoint
+ * so customers can verify their key without first knowing what scopes it
+ * carries.
+ */
 export async function authenticateApiKey(
   request: Request,
-  requiredScope: Scope,
+  requiredScope: Scope | null,
 ): Promise<ApiAuthSuccess | ApiAuthFailure> {
   const auth = request.headers.get('authorization')
   if (!auth?.startsWith('Bearer ')) {
@@ -86,7 +93,7 @@ export async function authenticateApiKey(
     }
   }
 
-  if (!key.scopes.includes(requiredScope)) {
+  if (requiredScope !== null && !key.scopes.includes(requiredScope)) {
     return {
       ok: false,
       response: Response.json({ error: `Scope '${requiredScope}' not granted on this key` }, { status: 403 }),

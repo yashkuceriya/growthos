@@ -265,6 +265,13 @@ supabase/migrations/
   - **Ad Studio detail panel** (`/ad-studio`): button next to Generate Images. Inline `<video>` preview below the image stack.
 - The dispatcher's existing auto-attach (`lib/video/index.ts → attachVideoToParent`) writes `video_url` / `video_render_id` / `video_status` back to the parent row when the render completes — no extra wiring needed.
 
+## Health endpoint + scope-free auth (Bundle BB — no migration)
+- New `GET /api/v1/health` — the first endpoint a new integration should hit. Returns `{ ok, server_time, key: { id, name, prefix, scopes, ... }, rate_limit: { limit, remaining } }` for any valid key.
+- **Why scope-free**: customers minting a new key may not remember which scopes they granted. Hitting health surfaces the actual scope list so they can see what their key allows. With required-scope auth, they'd have to know in advance.
+- **Implementation**: `authenticateApiKey(request, null)` — extended the helper to accept `Scope | null`. Null skips the scope check but keeps every other gate (key found, not revoked, not expired). Two new tests cover the null path, including verification that revoked keys still get rejected.
+- **Still rate-limited**: hitting `/api/v1/health` consumes a token from the same per-key bucket as everything else. CI loops will see 429 if they hammer it. The response includes `rate_limit.remaining` in the body too, in addition to the `x-ratelimit-*` headers, so customers see the contract from two angles.
+- Added to `lib/api-registry.ts` as the first entry — appears at the top of the API Reference docs page. The "Any scope" pill replaces the usual scope name in the docs UI.
+
 ## Per-API-key rate limits (Bundle AA — migration 024)
 - **Why**: a runaway client integration could otherwise burn budgets and overwhelm the queue. Now every v1 endpoint consumes one token from a per-key bucket; bursts are capped, sustained throughput has a clear ceiling, and the customer's own client gets headers so they can self-throttle.
 - **Algorithm**: token bucket. Default burst 60, refill 1 tok/sec → sustained 60 req/min, allowing brief spikes up to 60 in a burst. Override via env vars `API_RATE_LIMIT_BURST` / `API_RATE_LIMIT_RATE` without redeploying.

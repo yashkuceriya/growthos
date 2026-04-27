@@ -57,7 +57,7 @@ function EndpointCard({ ep }: { ep: ApiEndpointDef }) {
         <code className="font-mono-data text-xs text-slate-100">{ep.path}</code>
         <StatusPill tone="info">
           <Lock className="mr-1 inline h-2.5 w-2.5" />
-          {ep.scope}
+          {ep.scope ?? 'any scope'}
         </StatusPill>
         {ep.idempotent && (
           <StatusPill tone="success">

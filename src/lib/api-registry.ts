@@ -20,8 +20,8 @@ export interface ApiEndpointDef {
   /** Human title for navigation. */
   title: string
   description: string
-  /** Required API-key scope. */
-  scope: Scope
+  /** Required API-key scope, or null if any valid key passes (health). */
+  scope: Scope | null
   /** Whether the route honors `Idempotency-Key` for safe retries. */
   idempotent: boolean
   /** Status code on the happy path. */
@@ -33,6 +33,25 @@ export interface ApiEndpointDef {
 }
 
 export const API_ENDPOINTS: ApiEndpointDef[] = [
+  // ── Health ─────────────────────────────────────────────────────────
+  {
+    method: 'GET',
+    path: '/api/v1/health',
+    title: 'Verify API key + view scopes',
+    description: 'No-op endpoint that authenticates the key and returns its metadata (name, scopes, last used). The first call any new integration should make — confirms the key is valid, surfaces the granted scopes, and exercises the rate limiter so you can see the headers.',
+    scope: null,
+    idempotent: false,
+    successStatus: 200,
+    response: [
+      { name: 'ok', type: 'boolean', required: true },
+      { name: 'server_time', type: 'string (ISO 8601)', required: true, description: 'Compare to your client clock to detect skew.' },
+      { name: 'key', type: '{ id, name, prefix, scopes[], last_used_at, expires_at, created_at }', required: true },
+      { name: 'rate_limit', type: '{ limit, remaining }', required: true },
+    ],
+    notes: [
+      'Any valid key passes — scope is not checked. Use this to discover which scopes a key actually has.',
+    ],
+  },
   // ── Projects ───────────────────────────────────────────────────────
   {
     method: 'POST',
