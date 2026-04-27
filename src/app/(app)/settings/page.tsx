@@ -13,6 +13,7 @@ import { WebhookVerifySnippet } from '@/components/ui/webhook-verify-snippet'
 import { WEBHOOK_EVENTS } from '@/lib/webhooks/events'
 import { ApiReference } from '@/components/ui/api-reference'
 import { useProject } from '@/hooks/use-project'
+import type { IntegrationHealth } from '@/app/api/dashboard/health/route'
 
 const SECTIONS = [
   { key: 'profile', label: 'Profile', icon: User },
@@ -50,12 +51,8 @@ interface SocialAccountRow {
   connected_at: string
 }
 
-const INTEGRATIONS = [
-  { name: 'Google Ads', status: 'connected' as const, detail: 'Connected — v14.1' },
-  { name: 'Meta Graph', status: 'connected' as const, detail: 'Live — 2 accounts' },
-  { name: 'TikTok Pixel', status: 'error' as const, detail: 'Reauth required' },
-  { name: 'SendGrid', status: 'connected' as const, detail: '99.5% deliverability' },
-]
+// Integrations panel reads from /api/dashboard/health for real env-var
+// presence + activity-anchored status. No hardcoded list.
 
 const SCOPE_OPTIONS = [
   { value: 'leads:write', label: 'Write leads', hint: 'POST /api/v1/leads' },
@@ -251,6 +248,20 @@ export default function SettingsPage() {
   useEffect(() => {
     if (section === 'webhooks') void refreshWebhooks()
   }, [section, refreshWebhooks])
+
+  // Real integrations status — derived from env-var presence + activity
+  // ledger probes server-side. Replaces what used to be a hardcoded fake.
+  const [integrationsList, setIntegrationsList] = useState<IntegrationHealth[]>([])
+  const [integrationsLoading, setIntegrationsLoading] = useState(false)
+  useEffect(() => {
+    if (section !== 'integrations') return
+    setIntegrationsLoading(true)
+    fetch('/api/dashboard/health')
+      .then((r) => r.json())
+      .then((j) => setIntegrationsList(j.integrations ?? []))
+      .catch(() => {})
+      .finally(() => setIntegrationsLoading(false))
+  }, [section])
 
   function toggleWebhookEvent(ev: string) {
     setWhEvents((prev) => {
@@ -816,22 +827,36 @@ export default function SettingsPage() {
 
           {section === 'integrations' && (
             <SectionPanel title="Integrations">
-              <div className="grid grid-cols-2 gap-3">
-                {INTEGRATIONS.map((i) => (
-                  <div key={i.name} className="rounded-md border border-slate-800 bg-slate-800/40 p-4">
-                    <div className="flex items-start justify-between mb-2">
-                      <h3 className="text-sm font-semibold text-slate-100">{i.name}</h3>
-                      <StatusPill tone={i.status === 'connected' ? 'success' : 'error'}>
-                        {i.status === 'connected' ? 'Connected' : 'Action Required'}
-                      </StatusPill>
-                    </div>
-                    <p className="text-xs text-slate-400 mb-3">{i.detail}</p>
-                    <button className="rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-800/60">
-                      {i.status === 'connected' ? 'Disconnect' : 'Connect'}
-                    </button>
-                  </div>
-                ))}
-              </div>
+              <p className="mb-4 text-xs text-slate-400">
+                Status of every external service GrowthOS depends on. Required services must be configured for the system to work; optional services unlock additional capability when enabled.
+              </p>
+              {integrationsLoading && integrationsList.length === 0 ? (
+                <p className="text-xs text-slate-500">Checking…</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  {integrationsList.map((i) => {
+                    const tone =
+                      i.status === 'ok' ? 'success' :
+                      i.status === 'warn' ? 'warn' :
+                      i.status === 'error' ? 'error' :
+                      'neutral'
+                    const label =
+                      i.status === 'ok' ? 'OK' :
+                      i.status === 'warn' ? 'Action needed' :
+                      i.status === 'error' ? 'Required' :
+                      i.configured ? 'Configured' : 'Not configured'
+                    return (
+                      <div key={i.name} className="rounded-md border border-slate-800 bg-slate-800/40 p-4">
+                        <div className="flex items-start justify-between mb-2">
+                          <h3 className="text-sm font-semibold text-slate-100">{i.name}</h3>
+                          <StatusPill tone={tone}>{label}</StatusPill>
+                        </div>
+                        <p className="text-xs text-slate-400">{i.detail}</p>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </SectionPanel>
           )}
 
