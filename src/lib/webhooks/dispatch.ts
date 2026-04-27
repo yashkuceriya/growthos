@@ -5,6 +5,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { buildSignatureHeader } from './sign'
+import { validateWebhookUrl } from './url-validator'
 
 export const MAX_DELIVERY_ATTEMPTS = 5
 
@@ -157,25 +158,33 @@ export async function deliverWebhook(
   let responseBody = ''
   let networkError: string | null = null
 
-  try {
-    const res = await fetch(endpoint.url, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'user-agent': 'GrowthOS-Webhooks/1.0',
-        'x-growthos-event': claimed.event_type,
-        'x-growthos-delivery': claimed.id,
-        'x-growthos-signature': signature,
-        'x-growthos-timestamp': String(timestamp),
-      },
-      body,
-      signal: AbortSignal.timeout(15_000),
-    })
-    responseStatus = res.status
-    const text = await res.text().catch(() => '')
-    responseBody = text.slice(0, RESPONSE_BODY_MAX)
-  } catch (err) {
-    networkError = err instanceof Error ? err.message : String(err)
+  // Defense-in-depth: re-validate the URL right before fetch. Even if the
+  // creation route validated, a future migration / data-fix could leave a
+  // bad URL on a row. SSRF is too easy to mis-defend; double-check.
+  const urlCheck = validateWebhookUrl(endpoint.url)
+  if (!urlCheck.ok) {
+    networkError = `Refusing to deliver: ${urlCheck.reason}`
+  } else {
+    try {
+      const res = await fetch(endpoint.url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'user-agent': 'GrowthOS-Webhooks/1.0',
+          'x-growthos-event': claimed.event_type,
+          'x-growthos-delivery': claimed.id,
+          'x-growthos-signature': signature,
+          'x-growthos-timestamp': String(timestamp),
+        },
+        body,
+        signal: AbortSignal.timeout(15_000),
+      })
+      responseStatus = res.status
+      const text = await res.text().catch(() => '')
+      responseBody = text.slice(0, RESPONSE_BODY_MAX)
+    } catch (err) {
+      networkError = err instanceof Error ? err.message : String(err)
+    }
   }
 
   const succeeded = responseStatus !== null && responseStatus >= 200 && responseStatus < 300

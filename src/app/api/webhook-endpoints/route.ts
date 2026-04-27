@@ -9,15 +9,7 @@ import { createClient } from '@/lib/supabase/server'
 import { wrapHandler } from '@/lib/api-error'
 import { generateWebhookSecret } from '@/lib/webhooks/sign'
 import { SUPPORTED_EVENTS, isSupportedEvent } from '@/lib/webhooks/events'
-
-function isValidUrl(s: string): boolean {
-  try {
-    const u = new URL(s)
-    return u.protocol === 'https:' || u.protocol === 'http:'
-  } catch {
-    return false
-  }
-}
+import { validateWebhookUrl } from '@/lib/webhooks/url-validator'
 
 async function handleGet() {
   const supabase = await createClient()
@@ -44,8 +36,12 @@ async function handlePost(request: Request) {
     project_id?: string | null
   }
 
-  if (!body.url || !isValidUrl(body.url)) {
-    return Response.json({ error: 'Valid url required' }, { status: 400 })
+  if (!body.url) {
+    return Response.json({ error: 'url required' }, { status: 400 })
+  }
+  const urlCheck = validateWebhookUrl(body.url)
+  if (!urlCheck.ok) {
+    return Response.json({ error: urlCheck.reason ?? 'Invalid url' }, { status: 400 })
   }
   const events = Array.isArray(body.events)
     ? body.events.filter((e): e is string => typeof e === 'string' && isSupportedEvent(e))

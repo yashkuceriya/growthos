@@ -265,6 +265,25 @@ supabase/migrations/
   - **Ad Studio detail panel** (`/ad-studio`): button next to Generate Images. Inline `<video>` preview below the image stack.
 - The dispatcher's existing auto-attach (`lib/video/index.ts → attachVideoToParent`) writes `video_url` / `video_render_id` / `video_status` back to the parent row when the render completes — no extra wiring needed.
 
+## SSRF guard on webhook URLs (Bundle JJ — no migration)
+- **Why**: webhook URL validation only checked `protocol === 'http' | 'https'`. Anyone with `webhooks:write` could register `http://169.254.169.254/latest/meta-data/iam/security-credentials/` (AWS metadata IP), the dispatcher would POST to it, and the response body (truncated to 2000 chars) would land in `webhook_deliveries.response_body` — readable via the deliveries panel. **CVE-class issue**: customers could exfiltrate cloud credentials, hit our own internal endpoints, or scan internal networks via the webhook delivery surface.
+- **`lib/webhooks/url-validator.ts` (new)**: blocks
+  - non-http(s) protocols (file:, ftp:, javascript:, etc.)
+  - URLs with embedded credentials (`user:pass@host`)
+  - cloud metadata IPs (`169.254.169.254`, `metadata.google.internal`, `metadata.azure.com`)
+  - loopback (`localhost`, `127.x.x.x/8`, `::1`)
+  - RFC1918 private ranges (`10/8`, `172.16-31`, `192.168/16`)
+  - 0.0.0.0
+  - 100.64.0.0/10 (carrier-grade NAT, often Tailscale/internal)
+  - IPv6 link-local (`fe80::/10`) and ULA (`fc00::/7`)
+  - `.internal` / `.local` / `.corp` / `.intranet` / `.lan` suffixes
+- **Dev escape hatch**: when `NODE_ENV !== 'production'`, allows `localhost` / `127.0.0.1` / `::1` so devs can point at a local receiver without ngrok. Cloud metadata + RFC1918 stay blocked even in dev (rarely a real receiver).
+- **Two-layer enforcement**:
+  1. `/api/webhook-endpoints` (dashboard route) and `/api/v1/webhooks` (public API) reject bad URLs at create time with a clear 400 reason.
+  2. `lib/webhooks/dispatch.ts → deliverWebhook` re-validates right before `fetch()`. Defense-in-depth — if a future migration or data-fix leaves a bad URL on a row, the dispatcher refuses to POST. Stamps the row with `error: "Refusing to deliver: <reason>"` so the operator sees why.
+- **22 unit tests** in `src/lib/webhooks/url-validator.test.ts` covering every blocked vector + dev-mode exceptions.
+- **Cleanup**: removed the local `isValidUrl` / `isHttpsUrl` helpers from both webhook routes — replaced by the centralized validator.
+
 ## Smoke test + cache-stale detection + email cron fixes (Bundle II — no migration)
 - **Why**: continuing the practical audit. Found three more silent-fail patterns:
   1. **PostgREST schema cache stale**: every table from migrations 014+ (api_keys, webhook_endpoints, ingest_jobs, idempotency_records, etc.) is INVISIBLE to INSERTs even though SELECTs work. Returns `PGRST205` on every mutation. **Every API key mint, webhook create, ingest enqueue silently fails in production.** Migration 025 already has `notify pgrst, 'reload schema'` at the bottom that fixes this — applying it heals both the missing-RPC issue and the schema-cache issue in one shot.
