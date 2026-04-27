@@ -82,6 +82,20 @@ async function handleGet(request: Request) {
     })
   }
 
+  // PostgREST mutation-cache probe. Tables added in migrations 014+ get
+  // stale-cached for INSERTs even when SELECTs work — silently breaking
+  // every API-key mint, webhook create, and queue enqueue with PGRST205.
+  // Migration 025's NOTIFY at the bottom forces a cache reload.
+  const cacheCheck = await checkSchemaCache(supabase)
+  if (!cacheCheck.fresh) {
+    integrations.unshift({
+      name: 'PostgREST schema cache',
+      configured: false,
+      status: 'error',
+      detail: `Cache is stale — INSERT into ${cacheCheck.staleTable} returns PGRST205 even though the table exists. Apply supabase/migrations/025_rpc_redo.sql (the NOTIFY at the bottom reloads the cache).`,
+    })
+  }
+
   // Anchor "OpenRouter ok" to actual usage in the last 30 days.
   const openrouter = integrations.find((i) => i.name === 'OpenRouter')
   if (openrouter && openrouter.configured) {
@@ -107,6 +121,27 @@ async function handleGet(request: Request) {
  * (budget caps / rate limits / brand_voice merges all break invisibly).
  * Surfacing this on the dashboard turns a hidden bug into a visible one.
  */
+/**
+ * Detect a stale PostgREST schema cache by attempting an empty insert
+ * into a table from a recent migration. If the cache is fresh we get a
+ * NOT-NULL or RLS error (which is fine — we don't actually write); if
+ * stale we get PGRST205 which means the table is invisible to writes.
+ */
+async function checkSchemaCache(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+): Promise<{ fresh: boolean; staleTable?: string }> {
+  // Pick a recent table that the user shouldn't be flooded with rows in
+  // even if the insert weirdly succeeds (it won't — RLS gates it).
+  const probeTables = ['idempotency_records', 'webhook_endpoints']
+  for (const t of probeTables) {
+    const { error } = await supabase.from(t).insert({}).select()
+    if (error?.code === 'PGRST205') {
+      return { fresh: false, staleTable: t }
+    }
+  }
+  return { fresh: true }
+}
+
 async function checkCriticalRpcs(
   supabase: Awaited<ReturnType<typeof createClient>>,
 ): Promise<{ allPresent: boolean; missing: string[] }> {

@@ -222,8 +222,15 @@ async function processDueEnrollments(supabase: ReturnType<typeof createServiceCl
       }
     } catch (err) {
       failed += 1
+      // Defer the next attempt by 30 min so a single broken enrollment
+      // doesn't get re-tried every cron tick. Without this, a transient
+      // upstream failure or a bad template caused the cron to spin on
+      // the same row forever, racking up failure counts but never
+      // actually advancing.
+      const retryAt = new Date(Date.now() + 30 * 60_000).toISOString()
       await supabase.from('email_sequence_enrollments').update({
-        metadata: { last_error: err instanceof Error ? err.message : 'Unknown' },
+        next_send_at: retryAt,
+        metadata: { last_error: err instanceof Error ? err.message : 'Unknown', last_failed_at: new Date().toISOString() },
       }).eq('id', enrollment.id)
       console.error('[sequence-tick][send]', err)
     }
@@ -237,6 +244,19 @@ async function handleRequest(request: Request) {
   const expected = process.env.CRON_SECRET
   if (!expected || auth !== `Bearer ${expected}`) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  // Bail early if Resend isn't configured. Without this, every due
+  // enrollment tries to send, throws "RESEND_API_KEY not set", increments
+  // a failed counter — but next_send_at doesn't move, so the cron retries
+  // the same broken enrollment forever. Better to no-op loudly.
+  if (!process.env.RESEND_API_KEY) {
+    return Response.json({
+      tick_at: new Date().toISOString(),
+      error: 'RESEND_API_KEY missing — email sequences cannot send. Set the env var to resume.',
+      backfill: { enrolled: 0 },
+      processed: { sent: 0, failed: 0, completed: 0 },
+    }, { status: 503 })
   }
 
   const supabase = createServiceClient()

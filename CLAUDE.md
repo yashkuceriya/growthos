@@ -265,6 +265,26 @@ supabase/migrations/
   - **Ad Studio detail panel** (`/ad-studio`): button next to Generate Images. Inline `<video>` preview below the image stack.
 - The dispatcher's existing auto-attach (`lib/video/index.ts → attachVideoToParent`) writes `video_url` / `video_render_id` / `video_status` back to the parent row when the render completes — no extra wiring needed.
 
+## Smoke test + cache-stale detection + email cron fixes (Bundle II — no migration)
+- **Why**: continuing the practical audit. Found three more silent-fail patterns:
+  1. **PostgREST schema cache stale**: every table from migrations 014+ (api_keys, webhook_endpoints, ingest_jobs, idempotency_records, etc.) is INVISIBLE to INSERTs even though SELECTs work. Returns `PGRST205` on every mutation. **Every API key mint, webhook create, ingest enqueue silently fails in production.** Migration 025 already has `notify pgrst, 'reload schema'` at the bottom that fixes this — applying it heals both the missing-RPC issue and the schema-cache issue in one shot.
+  2. **Email sequence-tick busy-loop**: when `RESEND_API_KEY` is missing, every due enrollment threw "RESEND_API_KEY not set" inside the per-row loop, but `next_send_at` never got pushed forward — the cron retried the same broken row every tick *forever*. Same with `/api/email/send`.
+  3. **Smoke test gap**: vitest covers unit logic, CI passes, dev server compiles — but none of that catches "the tables exist for SELECT but not INSERT" or "RPC missing in live DB". Needed a real end-to-end probe.
+- **`scripts/smoke.ts`** — runnable diagnostic that exercises a live deployment:
+  - Env-var inventory (required vs optional)
+  - 11 table read probes
+  - 4 table **write** probes (catches PGRST205 stale-cache state)
+  - 3 RPC presence probes
+  - Storage bucket existence checks (3 buckets)
+  - 5 HTTP route 401-gate probes
+  - API-key mint → /v1/health round-trip → rate-limit decrement check (verifies bundle AA actually runs)
+  - HMAC sign+verify + tamper-detect round-trip (verifies bundle S algorithm matches receivers)
+  - Cleans up its temp key + records when done
+  - Run with: `npx tsx scripts/smoke.ts`. Exits non-zero on any failure so CI / cron can run it.
+- **Cache-stale visibility on the dashboard**: `/api/dashboard/health` now also probes a write to `idempotency_records` / `webhook_endpoints`. If it gets `PGRST205`, it prepends a red "PostgREST schema cache stale" integration row pointing at migration 025. Operator now sees this on every dashboard load.
+- **Email cron loud-fail**: `/api/email/sequence-tick` and `/api/email/send` now bail with a 503 if `RESEND_API_KEY` is unset, instead of iterating subscribers and failing each one. Still inside the cron loop, when an individual enrollment fails, `next_send_at` is now pushed +30 min so a single broken row can't pin the cron in a busy-loop.
+- **Verified end-to-end**: ran the smoke test against the live deployment — caught all 8 issues with their root causes (3 RPCs missing + 4 stale-cache tables + 1 mint failure cascading from the stale cache). After the user applies migration 025, all 8 should clear at once.
+
 ## Self-healing storage buckets (Bundle HH — no migration)
 - **Why**: continuing the practical audit, found that **zero Storage buckets existed** in the live project. Three env vars (`SCREENSHOT_STORAGE_BUCKET`, `VIDEO_STORAGE_BUCKET`, `IMAGE_STORAGE_BUCKET`) were unset AND no buckets had been created manually. Every code path that tried to upload silently fell back to a less-good behavior:
   - Ad images: stored as base64 `data:` URLs in `ad_copies.media_urls`. Found a real existing row at **1.68 MB** for one image; three images = ~5MB row. After 50-100 ads, `/ad-studio`'s `select('*')` would OOM the page.

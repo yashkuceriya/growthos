@@ -6,6 +6,16 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
+  // Loud-fail before iterating subscribers. Without this, every send
+  // threw "RESEND_API_KEY not set" inside the per-subscriber loop and
+  // marked every email_sends row 'failed' before bailing.
+  if (!process.env.RESEND_API_KEY) {
+    return Response.json(
+      { error: 'RESEND_API_KEY not configured — email sends are disabled. Set the env var to enable.' },
+      { status: 503 },
+    )
+  }
+
   const body = await request.json()
   const { templateId, listId, subscriberIds } = body
 
