@@ -265,6 +265,12 @@ supabase/migrations/
   - **Ad Studio detail panel** (`/ad-studio`): button next to Generate Images. Inline `<video>` preview below the image stack.
 - The dispatcher's existing auto-attach (`lib/video/index.ts → attachVideoToParent`) writes `video_url` / `video_render_id` / `video_status` back to the parent row when the render completes — no extra wiring needed.
 
+## Webhook test + redrive (Bundle V — no migration)
+- **Send test event**: per-endpoint button (paper-plane icon) on the settings page. POSTs `/api/webhook-endpoints/:id/test` which inserts a `test.ping` delivery row and drives it through `deliverWebhook` synchronously, returning the HTTP outcome to the caller. Result toast tells the user instantly whether their receiver acked (2xx → success, 5xx → pending/will-retry, 4xx → failed). The test row shows up in the deliveries panel just like real events.
+- **Retry now**: per-delivery button on `failed` and `exhausted` rows (refresh icon). POSTs `/api/webhook-endpoints/:id/deliveries/:deliveryId/redrive` which conditionally resets the row to `status='pending', attempts=0, error=null, next_attempt_at=now` (conditional UPDATE on status — race-safe vs the cron) then dispatches synchronously. Refuses to redrive `success` (idempotency) or `pending`/`delivering` (already in flight).
+- `test.ping` is intentionally NOT in `SUPPORTED_EVENTS` — it bypasses `emitEvent`'s subscription filter and dispatches directly to the single endpoint being tested.
+- The handlers refresh the deliveries cache for the affected endpoint after the round-trip so the user sees the new row without a manual refresh.
+
 ## More webhook events (Bundle U — no migration)
 - Adds `lead.created`, `social.published`, `email.bounced` to `SUPPORTED_EVENTS`. Total 5 events shipping now.
 - **Wire-ins**:

@@ -8,7 +8,7 @@ import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { Key, Plug, User, Users as TeamIcon, CreditCard, Plus, Copy, Trash2, Share2, MessageCircle, Briefcase, Webhook, Power, ChevronDown, ChevronRight } from 'lucide-react'
+import { Key, Plug, User, Users as TeamIcon, CreditCard, Plus, Copy, Trash2, Share2, MessageCircle, Briefcase, Webhook, Power, ChevronDown, ChevronRight, Send, RefreshCw } from 'lucide-react'
 import { useProject } from '@/hooks/use-project'
 
 const SECTIONS = [
@@ -300,6 +300,51 @@ export default function SettingsPage() {
     }
   }
 
+  async function sendTestWebhook(id: string) {
+    const res = await fetch(`/api/webhook-endpoints/${id}/test`, { method: 'POST' })
+    const json = await res.json()
+    if (!res.ok) {
+      toast.error(json.error ?? 'Test failed')
+      return
+    }
+    if (json.final_status === 'success') toast.success('Test delivered (2xx)')
+    else if (json.final_status === 'pending') toast.warning('Receiver returned a transient error — will retry')
+    else toast.error(`Test ${json.final_status}`)
+    // Refresh deliveries panel so the user sees the row immediately.
+    setWhDeliveries((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+    if (whExpandedId === id) {
+      setWhDeliveriesLoading(id)
+      const dRes = await fetch(`/api/webhook-endpoints/${id}/deliveries`)
+      const dJson = await dRes.json()
+      setWhDeliveries((prev) => ({ ...prev, [id]: dJson.deliveries ?? [] }))
+      setWhDeliveriesLoading(null)
+    }
+    await refreshWebhooks()
+  }
+
+  async function redriveDelivery(endpointId: string, deliveryId: string) {
+    const res = await fetch(`/api/webhook-endpoints/${endpointId}/deliveries/${deliveryId}/redrive`, { method: 'POST' })
+    const json = await res.json()
+    if (!res.ok) {
+      toast.error(json.error ?? 'Retry failed')
+      return
+    }
+    if (json.final_status === 'success') toast.success('Retry delivered')
+    else if (json.final_status === 'pending') toast.warning('Still failing — scheduled for next attempt')
+    else toast.error(`Retry ${json.final_status}`)
+    // Refresh just this endpoint's deliveries.
+    setWhDeliveriesLoading(endpointId)
+    const dRes = await fetch(`/api/webhook-endpoints/${endpointId}/deliveries`)
+    const dJson = await dRes.json()
+    setWhDeliveries((prev) => ({ ...prev, [endpointId]: dJson.deliveries ?? [] }))
+    setWhDeliveriesLoading(null)
+    await refreshWebhooks()
+  }
+
   async function expandWebhook(id: string) {
     if (whExpandedId === id) {
       setWhExpandedId(null)
@@ -589,6 +634,13 @@ export default function SettingsPage() {
                           </button>
                           <div className="shrink-0 flex gap-1">
                             <button
+                              onClick={() => sendTestWebhook(w.id)}
+                              title="Send test event"
+                              className="rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-300 hover:bg-slate-700"
+                            >
+                              <Send className="h-3 w-3" />
+                            </button>
+                            <button
                               onClick={() => toggleWebhookActive(w)}
                               title={w.active ? 'Disable' : 'Re-enable'}
                               className="rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-700"
@@ -616,6 +668,7 @@ export default function SettingsPage() {
                               <ul className="space-y-1">
                                 {deliveries.map((d) => {
                                   const tone: 'success' | 'info' | 'warn' = d.status === 'success' ? 'success' : d.status === 'pending' || d.status === 'delivering' ? 'info' : 'warn'
+                                  const canRedrive = d.status === 'failed' || d.status === 'exhausted'
                                   return (
                                     <li key={d.id} className="rounded border border-slate-800 bg-slate-900/60 px-2 py-1.5 text-[11px]">
                                       <div className="flex items-center gap-2 flex-wrap">
@@ -626,6 +679,15 @@ export default function SettingsPage() {
                                         )}
                                         <span className="font-mono-data text-slate-500">attempt {d.attempts}</span>
                                         <span className="ml-auto font-mono-data text-slate-500">{new Date(d.created_at).toLocaleString()}</span>
+                                        {canRedrive && (
+                                          <button
+                                            onClick={() => redriveDelivery(w.id, d.id)}
+                                            title="Retry now"
+                                            className="rounded border border-slate-700 bg-slate-800 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-300 hover:bg-slate-700"
+                                          >
+                                            <RefreshCw className="h-3 w-3" />
+                                          </button>
+                                        )}
                                       </div>
                                       {d.error && (
                                         <div className="mt-1 font-mono-data text-[10px] text-rose-300 break-all">{d.error}</div>
