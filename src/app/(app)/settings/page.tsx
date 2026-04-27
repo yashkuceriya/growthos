@@ -8,16 +8,22 @@ import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { Key, Plug, User, Users as TeamIcon, CreditCard, Plus, Copy, Trash2, Share2, MessageCircle, Briefcase } from 'lucide-react'
+import { Key, Plug, User, Users as TeamIcon, CreditCard, Plus, Copy, Trash2, Share2, MessageCircle, Briefcase, Webhook, Power, ChevronDown, ChevronRight } from 'lucide-react'
 import { useProject } from '@/hooks/use-project'
 
 const SECTIONS = [
   { key: 'profile', label: 'Profile', icon: User },
   { key: 'api-keys', label: 'API Keys', icon: Key },
+  { key: 'webhooks', label: 'Webhooks', icon: Webhook },
   { key: 'social-accounts', label: 'Social Accounts', icon: Share2 },
   { key: 'integrations', label: 'Integrations', icon: Plug },
   { key: 'team', label: 'Team', icon: TeamIcon },
   { key: 'billing', label: 'Billing', icon: CreditCard },
+] as const
+
+const WEBHOOK_EVENT_OPTIONS = [
+  { value: 'ingest.completed', label: 'Ingest completed', hint: 'Project crawl finished — payload includes brand info' },
+  { value: 'ingest.failed', label: 'Ingest failed', hint: 'Crawl gave up after retries — payload includes error reason' },
 ] as const
 
 const SOCIAL_PLATFORMS = [
@@ -193,6 +199,119 @@ export default function SettingsPage() {
     })
   }
 
+  // ── Webhooks ───────────────────────────────────────────────────────────
+  interface WebhookRow {
+    id: string
+    project_id: string | null
+    url: string
+    events: string[]
+    active: boolean
+    consecutive_failures: number
+    last_delivery_at: string | null
+    last_delivery_status: 'success' | 'failed' | null
+    created_at: string
+  }
+  interface DeliveryRow {
+    id: string
+    event_type: string
+    status: 'pending' | 'delivering' | 'success' | 'failed' | 'exhausted'
+    attempts: number
+    response_status: number | null
+    error: string | null
+    delivered_at: string | null
+    created_at: string
+  }
+
+  const [webhooks, setWebhooks] = useState<WebhookRow[]>([])
+  const [loadingWebhooks, setLoadingWebhooks] = useState(false)
+  const [whCreateOpen, setWhCreateOpen] = useState(false)
+  const [whUrl, setWhUrl] = useState('')
+  const [whEvents, setWhEvents] = useState<Set<string>>(new Set())
+  const [whProjectScope, setWhProjectScope] = useState<'all' | 'active'>('all')
+  const [whCreating, setWhCreating] = useState(false)
+  const [whNewSecret, setWhNewSecret] = useState<string | null>(null)
+  const [whExpandedId, setWhExpandedId] = useState<string | null>(null)
+  const [whDeliveries, setWhDeliveries] = useState<Record<string, DeliveryRow[]>>({})
+  const [whDeliveriesLoading, setWhDeliveriesLoading] = useState<string | null>(null)
+
+  const refreshWebhooks = useCallback(async () => {
+    setLoadingWebhooks(true)
+    const res = await fetch('/api/webhook-endpoints')
+    const json = await res.json()
+    setWebhooks(json.endpoints ?? [])
+    setLoadingWebhooks(false)
+  }, [])
+
+  useEffect(() => {
+    if (section === 'webhooks') void refreshWebhooks()
+  }, [section, refreshWebhooks])
+
+  function toggleWebhookEvent(ev: string) {
+    setWhEvents((prev) => {
+      const next = new Set(prev)
+      if (next.has(ev)) next.delete(ev); else next.add(ev)
+      return next
+    })
+  }
+
+  async function createWebhook(e: React.FormEvent) {
+    e.preventDefault()
+    setWhCreating(true)
+    const projectId = whProjectScope === 'active' && activeProject ? activeProject.id : null
+    const res = await fetch('/api/webhook-endpoints', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: whUrl,
+        events: Array.from(whEvents),
+        project_id: projectId,
+      }),
+    })
+    const json = await res.json()
+    if (!res.ok) {
+      toast.error(json.error ?? 'Create failed')
+    } else {
+      setWhNewSecret(json.secret)
+      setWhCreateOpen(false)
+      setWhUrl(''); setWhEvents(new Set()); setWhProjectScope('all')
+      await refreshWebhooks()
+    }
+    setWhCreating(false)
+  }
+
+  async function deleteWebhook(id: string) {
+    if (!confirm('Delete this webhook endpoint? Pending deliveries will be cancelled.')) return
+    const res = await fetch(`/api/webhook-endpoints/${id}`, { method: 'DELETE' })
+    if (res.ok) { toast.success('Deleted'); await refreshWebhooks() } else toast.error('Delete failed')
+  }
+
+  async function toggleWebhookActive(row: WebhookRow) {
+    const res = await fetch(`/api/webhook-endpoints/${row.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: !row.active }),
+    })
+    if (res.ok) {
+      toast.success(row.active ? 'Disabled' : 'Re-enabled')
+      await refreshWebhooks()
+    } else {
+      toast.error('Update failed')
+    }
+  }
+
+  async function expandWebhook(id: string) {
+    if (whExpandedId === id) {
+      setWhExpandedId(null)
+      return
+    }
+    setWhExpandedId(id)
+    if (!whDeliveries[id]) {
+      setWhDeliveriesLoading(id)
+      const res = await fetch(`/api/webhook-endpoints/${id}/deliveries`)
+      const json = await res.json()
+      setWhDeliveries((prev) => ({ ...prev, [id]: json.deliveries ?? [] }))
+      setWhDeliveriesLoading(null)
+    }
+  }
+
   return (
     <PageShell>
       <PageHeader title="Settings" subtitle="Manage your GrowthOS configuration" />
@@ -343,6 +462,186 @@ export default function SettingsPage() {
             </SectionPanel>
           )}
 
+          {section === 'webhooks' && (
+            <SectionPanel
+              title="Outbound Webhooks"
+              action={
+                <Dialog open={whCreateOpen} onOpenChange={setWhCreateOpen}>
+                  <DialogTrigger>
+                    <div className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-950 hover:bg-emerald-400">
+                      <Plus className="h-3.5 w-3.5" /> Add Endpoint
+                    </div>
+                  </DialogTrigger>
+                  <DialogContent className="border-slate-700 bg-slate-900 max-w-md">
+                    <DialogHeader><DialogTitle className="text-slate-100">Add webhook endpoint</DialogTitle></DialogHeader>
+                    <form onSubmit={createWebhook} className="space-y-3">
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Endpoint URL</div>
+                        <input
+                          required type="url" placeholder="https://your-app.com/webhooks/growthos"
+                          value={whUrl} onChange={(e) => setWhUrl(e.target.value)}
+                          className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Events</div>
+                        <div className="space-y-2">
+                          {WEBHOOK_EVENT_OPTIONS.map((opt) => (
+                            <label key={opt.value} className="flex items-start gap-2 rounded-md border border-slate-700 bg-slate-800/60 px-3 py-2 text-xs cursor-pointer hover:bg-slate-800">
+                              <input
+                                type="checkbox"
+                                checked={whEvents.has(opt.value)}
+                                onChange={() => toggleWebhookEvent(opt.value)}
+                                className="mt-0.5 accent-emerald-500"
+                              />
+                              <div>
+                                <div className="font-mono-data text-slate-100">{opt.value}</div>
+                                <div className="text-[10px] text-slate-500">{opt.hint}</div>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Scope</div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className={cn('rounded-md border px-3 py-2 text-xs cursor-pointer text-center', whProjectScope === 'all' ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/60 text-slate-400 hover:bg-slate-800')}>
+                            <input type="radio" name="wh-scope" checked={whProjectScope === 'all'} onChange={() => setWhProjectScope('all')} className="hidden" />
+                            All projects
+                          </label>
+                          <label className={cn('rounded-md border px-3 py-2 text-xs cursor-pointer text-center', whProjectScope === 'active' ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/60 text-slate-400 hover:bg-slate-800', !activeProject && 'opacity-40 cursor-not-allowed')}>
+                            <input type="radio" name="wh-scope" disabled={!activeProject} checked={whProjectScope === 'active'} onChange={() => setWhProjectScope('active')} className="hidden" />
+                            {activeProject ? activeProject.name : 'Active project'}
+                          </label>
+                        </div>
+                      </div>
+                      <button type="submit" disabled={whCreating || !whUrl || whEvents.size === 0} className="w-full rounded-md bg-emerald-500 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-950 hover:bg-emerald-400 disabled:opacity-50">
+                        {whCreating ? 'Creating…' : 'Add Endpoint'}
+                      </button>
+                    </form>
+                  </DialogContent>
+                </Dialog>
+              }
+            >
+              {whNewSecret && (
+                <div className="mb-4 rounded-md border border-emerald-500/40 bg-emerald-500/5 p-4">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-2">Signing secret — copy now, this is the only time it will be shown</div>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 rounded bg-slate-900 px-3 py-2 font-mono-data text-xs text-slate-100 break-all">{whNewSecret}</code>
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(whNewSecret); toast.success('Copied') }}
+                      className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-emerald-300 hover:bg-emerald-500/20"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setWhNewSecret(null)}
+                      className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-100"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                  <div className="mt-3 text-[10px] text-slate-500">
+                    Verify with HMAC-SHA256 over <code className="font-mono-data text-slate-400">{`${'${'}timestamp${'}'}.${'${'}rawBody${'}'}`}</code>. Header format: <code className="font-mono-data text-slate-400">x-growthos-signature: t=&lt;seconds&gt;,v1=&lt;hex&gt;</code>. Reject timestamps older than 5 min.
+                  </div>
+                </div>
+              )}
+
+              {loadingWebhooks ? (
+                <p className="text-sm text-slate-500">Loading…</p>
+              ) : webhooks.length === 0 ? (
+                <div className="py-8 text-center">
+                  <Webhook className="mx-auto h-8 w-8 text-slate-600 mb-2" />
+                  <p className="text-sm text-slate-400">No webhook endpoints. Add one to get notified when ingest jobs finish.</p>
+                </div>
+              ) : (
+                <ul className="space-y-2">
+                  {webhooks.map((w) => {
+                    const expanded = whExpandedId === w.id
+                    const deliveries = whDeliveries[w.id]
+                    return (
+                      <li key={w.id} className={cn('rounded-md border p-3', w.active ? 'border-slate-800 bg-slate-800/40' : 'border-slate-800 bg-slate-900/40 opacity-70')}>
+                        <div className="flex items-start justify-between gap-3">
+                          <button onClick={() => expandWebhook(w.id)} className="flex-1 min-w-0 text-left">
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              {expanded ? <ChevronDown className="h-3 w-3 text-slate-500" /> : <ChevronRight className="h-3 w-3 text-slate-500" />}
+                              <code className="font-mono-data text-xs text-slate-100 truncate">{w.url}</code>
+                              <StatusPill tone={w.active ? 'success' : 'neutral'}>
+                                {w.active ? 'Active' : 'Disabled'}
+                              </StatusPill>
+                              {w.consecutive_failures > 0 && (
+                                <StatusPill tone="warn">{w.consecutive_failures} consecutive fails</StatusPill>
+                              )}
+                              {w.project_id == null && (
+                                <StatusPill tone="info">All projects</StatusPill>
+                              )}
+                            </div>
+                            <div className="ml-5 flex flex-wrap gap-1">
+                              {w.events.map((e) => <StatusPill key={e} tone="info">{e}</StatusPill>)}
+                            </div>
+                            <div className="ml-5 mt-1 text-[10px] font-mono-data text-slate-500">
+                              Created {new Date(w.created_at).toLocaleDateString()}
+                              {w.last_delivery_at && ` · Last ${w.last_delivery_status ?? 'delivery'} ${new Date(w.last_delivery_at).toLocaleString()}`}
+                            </div>
+                          </button>
+                          <div className="shrink-0 flex gap-1">
+                            <button
+                              onClick={() => toggleWebhookActive(w)}
+                              title={w.active ? 'Disable' : 'Re-enable'}
+                              className="rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-700"
+                            >
+                              <Power className="h-3 w-3" />
+                            </button>
+                            <button
+                              onClick={() => deleteWebhook(w.id)}
+                              title="Delete"
+                              className="rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-rose-300 hover:bg-slate-700"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {expanded && (
+                          <div className="mt-3 ml-5 border-t border-slate-800 pt-3">
+                            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Recent deliveries</div>
+                            {whDeliveriesLoading === w.id ? (
+                              <p className="text-xs text-slate-500">Loading…</p>
+                            ) : !deliveries || deliveries.length === 0 ? (
+                              <p className="text-xs text-slate-500">No deliveries yet.</p>
+                            ) : (
+                              <ul className="space-y-1">
+                                {deliveries.map((d) => {
+                                  const tone: 'success' | 'info' | 'warn' = d.status === 'success' ? 'success' : d.status === 'pending' || d.status === 'delivering' ? 'info' : 'warn'
+                                  return (
+                                    <li key={d.id} className="rounded border border-slate-800 bg-slate-900/60 px-2 py-1.5 text-[11px]">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <StatusPill tone={tone}>{d.status}</StatusPill>
+                                        <code className="font-mono-data text-slate-300">{d.event_type}</code>
+                                        {d.response_status != null && (
+                                          <span className="font-mono-data text-slate-500">HTTP {d.response_status}</span>
+                                        )}
+                                        <span className="font-mono-data text-slate-500">attempt {d.attempts}</span>
+                                        <span className="ml-auto font-mono-data text-slate-500">{new Date(d.created_at).toLocaleString()}</span>
+                                      </div>
+                                      {d.error && (
+                                        <div className="mt-1 font-mono-data text-[10px] text-rose-300 break-all">{d.error}</div>
+                                      )}
+                                    </li>
+                                  )
+                                })}
+                              </ul>
+                            )}
+                          </div>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </SectionPanel>
+          )}
+
           {section === 'social-accounts' && (
             <SectionPanel
               title={`Social Accounts${activeProject ? ` · ${activeProject.name}` : ''}`}
@@ -450,7 +749,7 @@ export default function SettingsPage() {
             </SectionPanel>
           )}
 
-          {section !== 'api-keys' && section !== 'integrations' && section !== 'social-accounts' && (
+          {section !== 'api-keys' && section !== 'integrations' && section !== 'social-accounts' && section !== 'webhooks' && (
             <SectionPanel title={SECTIONS.find((s) => s.key === section)?.label}>
               <p className="text-sm text-slate-500">Coming soon.</p>
             </SectionPanel>

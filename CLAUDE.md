@@ -265,6 +265,14 @@ supabase/migrations/
   - **Ad Studio detail panel** (`/ad-studio`): button next to Generate Images. Inline `<video>` preview below the image stack.
 - The dispatcher's existing auto-attach (`lib/video/index.ts → attachVideoToParent`) writes `video_url` / `video_render_id` / `video_status` back to the parent row when the render completes — no extra wiring needed.
 
+## Webhook UI (Bundle T — no migration)
+- Settings page (`/settings`) gains a **Webhooks** section between API Keys and Social Accounts. Lists endpoints with status pill (Active/Disabled), failure-streak warning, scope tag (All projects vs project name), and per-event tags.
+- **Inline deliveries panel**: clicking a row expands the most recent 50 deliveries with status pill (success/info/warn), event type, HTTP response code, attempt count, timestamp, and error string. Cached client-side per endpoint id; doesn't auto-refresh.
+- **Add Endpoint dialog**: URL field, event-checkbox list (data-driven from `WEBHOOK_EVENT_OPTIONS`), scope radio (All projects vs the active project). Plaintext secret is shown once after create with copy button + signature-format hint (HMAC-SHA256 of `${timestamp}.${rawBody}`, header `x-growthos-signature: t=...,v1=...`).
+- **Disable/Re-enable** via Power button — calls `PATCH /api/webhook-endpoints/:id { active: bool }`. Re-enable also resets `consecutive_failures` to 0 so a borderline-broken receiver gets a fresh window.
+- **Session-authed dashboard routes** (parallel to the v1 API-key routes): `GET/POST /api/webhook-endpoints`, `DELETE/PATCH /api/webhook-endpoints/:id`, `GET /api/webhook-endpoints/:id/deliveries`. RLS enforces ownership.
+- **Shared event constant**: `lib/webhooks/events.ts → SUPPORTED_EVENTS` is now the single source of truth, used by both `/api/v1/webhooks` and `/api/webhook-endpoints` create handlers. Add a new event here when wiring new emit points.
+
 ## Outbound webhooks (Bundle S — migration 022)
 - **Why**: customers' servers want to react to GrowthOS events without polling. First two events shipped: `ingest.completed`, `ingest.failed` (fired from `lib/jobs/ingest-queue.ts → runIngestJob`).
 - **Tables** (migration 022): `webhook_endpoints` (url, plaintext secret, events[], active, consecutive_failures, project_id nullable for cross-project subscriptions). `webhook_deliveries` (event_payload jsonb, status pending|delivering|success|failed|exhausted, attempts, next_attempt_at for backoff scheduling, response_status/body for debugging).

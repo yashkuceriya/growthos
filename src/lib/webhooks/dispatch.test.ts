@@ -7,8 +7,6 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 import {
   deliverWebhook,
-  recoverStuckDeliveries,
-  emitEvent,
   MAX_DELIVERY_ATTEMPTS,
   AUTO_DISABLE_THRESHOLD,
   __testing,
@@ -18,10 +16,8 @@ import {
 
 const ORIGINAL_FETCH = globalThis.fetch
 
-interface StoredDelivery extends WebhookDeliveryRow {}
-interface StoredEndpoint extends WebhookEndpointRow {
-  active: boolean
-}
+type StoredDelivery = WebhookDeliveryRow
+type StoredEndpoint = WebhookEndpointRow
 
 function makeFakeSupabase(opts: {
   delivery?: StoredDelivery
@@ -218,20 +214,15 @@ describe('deliverWebhook outcomes', () => {
     const endpoint = baseEndpoint({ secret: 'whsec_unique_test_value' })
     const { supabase } = makeFakeSupabase({ delivery, endpoint })
 
-    let captured: Record<string, string> | null = null
-    stubFetch((_input) => {
-      // Spy via the fetch mock on globalThis — pull headers from the
-      // recorded last call after the await.
-      return new Response('ok', { status: 200 })
-    })
+    stubFetch(() => new Response('ok', { status: 200 }))
     await deliverWebhook(supabase as unknown as Parameters<typeof deliverWebhook>[0], delivery, endpoint)
     const fetchMock = globalThis.fetch as unknown as { mock: { calls: Array<[unknown, RequestInit]> } }
     const init = fetchMock.mock.calls[0]![1]
-    captured = init.headers as Record<string, string>
+    const captured = init.headers as Record<string, string>
 
-    expect(captured!['x-growthos-signature']).toMatch(/^t=\d+,v1=[0-9a-f]{64}$/)
-    expect(captured!['x-growthos-event']).toBe('ingest.completed')
-    expect(captured!['x-growthos-delivery']).toBe(delivery.id)
+    expect(captured['x-growthos-signature']).toMatch(/^t=\d+,v1=[0-9a-f]{64}$/)
+    expect(captured['x-growthos-event']).toBe('ingest.completed')
+    expect(captured['x-growthos-delivery']).toBe(delivery.id)
   })
 
   it('auto-disables endpoint after AUTO_DISABLE_THRESHOLD consecutive failures', async () => {

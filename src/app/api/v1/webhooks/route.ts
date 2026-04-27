@@ -15,8 +15,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { wrapHandler } from '@/lib/api-error'
 import { authenticateApiKey } from '@/lib/api-auth'
 import { generateWebhookSecret } from '@/lib/webhooks/sign'
-
-const SUPPORTED_EVENTS = ['ingest.completed', 'ingest.failed']
+import { SUPPORTED_EVENTS, isSupportedEvent } from '@/lib/webhooks/events'
 
 function isHttpsUrl(s: string): boolean {
   try {
@@ -55,7 +54,7 @@ async function handlePost(request: Request) {
     return Response.json({ error: 'Valid url required' }, { status: 400 })
   }
   const events = Array.isArray(body.events)
-    ? body.events.filter((e): e is string => typeof e === 'string' && SUPPORTED_EVENTS.includes(e))
+    ? body.events.filter((e): e is string => typeof e === 'string' && isSupportedEvent(e))
     : []
   if (events.length === 0) {
     return Response.json(

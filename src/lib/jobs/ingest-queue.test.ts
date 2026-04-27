@@ -20,7 +20,7 @@ import type { IngestJob } from './ingest-queue'
 import { runIngest } from '@/lib/ai/intelligence/ingest'
 import { checkBudget } from '@/lib/budget-guard'
 
-interface StoredJob extends IngestJob {}
+type StoredJob = IngestJob
 
 function makeFakeSupabase(opts: { job: StoredJob; refuseClaim?: boolean }) {
   let refuseNextClaim = !!opts.refuseClaim
