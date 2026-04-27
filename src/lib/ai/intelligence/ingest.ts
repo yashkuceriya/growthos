@@ -11,6 +11,7 @@ import { trackAICost, estimateCost } from '@/lib/cost-tracker'
 import { classifyProduct } from '@/lib/ai/intelligence/classifier'
 import { mergeBrandVoice } from '@/lib/brand-voice'
 import { captureScreenshot } from '@/lib/screenshots/capture'
+import { extractDesignTokens } from '@/lib/ai/design/extractor'
 
 export const BrandSchema = z.object({
   tagline: z.string().describe('Primary tagline or H1 headline from the page'),
@@ -142,6 +143,7 @@ ${trimmed}`,
   // Stored on brand_voice so downstream content generation (ad images,
   // landing pages) can use it as visual ground truth instead of relying
   // on whatever marketing image was already in the page HTML.
+  let capturedScreenshotUrl: string | null = null
   try {
     const shot = await captureScreenshot(supabase, userId, projectId, url)
     if (shot) {
@@ -150,10 +152,35 @@ ${trimmed}`,
         mirrored: shot.mirrored,
         captured_at: shot.capturedAt,
       }
+      capturedScreenshotUrl = shot.url
     }
   } catch (e) {
     // Screenshot is enrichment, not a hard requirement. Log + continue.
     console.error('[ingest] screenshot capture errored:', e instanceof Error ? e.message : e)
+  }
+
+  // Claude vision pass: extract structured design tokens from the
+  // captured screenshot. The image generator + landing-page generator
+  // read brand_voice.design_tokens and inject them as a prompt block
+  // so creatives feel native to the brand. Skipped if no screenshot
+  // landed (capture failed or no provider). Errors don't unwind ingest.
+  if (capturedScreenshotUrl && (object.tagline || object.value_proposition)) {
+    try {
+      const { tokens, modelUsed } = await extractDesignTokens({
+        supabase,
+        userId,
+        projectId,
+        screenshotUrl: capturedScreenshotUrl,
+        brandContext: `${object.tagline ?? ''} — ${object.value_proposition ?? ''}`,
+      })
+      patch.design_tokens = {
+        ...tokens,
+        extracted_at: new Date().toISOString(),
+        model: modelUsed,
+      }
+    } catch (e) {
+      console.error('[ingest] design-token extraction errored:', e instanceof Error ? e.message : e)
+    }
   }
 
   await mergeBrandVoice(supabase, projectId, patch)

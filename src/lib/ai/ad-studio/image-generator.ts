@@ -1,5 +1,18 @@
-// Generate ad images via OpenRouter → Gemini 2.5 Flash Image preview.
-// The model returns base64 image data in the assistant message content.
+// Generate ad images via OpenRouter → Gemini Flash Image. The model
+// returns base64 image data in the assistant message content.
+//
+// Inputs that materially affect quality:
+//   1. The captured screenshot (passed as image_url in the message
+//      content array — proper multimodal input, NOT a URL embedded in
+//      text). Anchors the visual brand.
+//   2. designTokensPrompt (if available) — Claude-extracted design
+//      system: hex palette, typography vibe, layout pattern, mood,
+//      visual rules. Comes from lib/ai/design/extractor.ts.
+//   3. Brand context — text descriptors of the product.
+//
+// Without (1) and (2) the model has only text to anchor on and tends to
+// produce generic AI-ad-looking output. With both, ads feel native to
+// the actual product.
 
 export interface ImageGenParams {
   headline: string
@@ -7,7 +20,10 @@ export interface ImageGenParams {
   primaryText?: string | null
   platform: string
   brandContext: string
+  /** Reference screenshot URL — passed as multimodal image input. */
   referenceImageUrl?: string | null
+  /** Optional pre-baked design-tokens prompt block (see designTokensPromptBlock). */
+  designTokensPrompt?: string | null
   aspect: '1:1' | '9:16' | '1.91:1'
 }
 
@@ -27,6 +43,13 @@ function aspectInstructions(aspect: ImageGenParams['aspect']) {
 }
 
 function buildPrompt(p: ImageGenParams): string {
+  const referenceClause = p.referenceImageUrl
+    // The image itself is attached via the message content array — refer
+    // to it as "the attached reference" rather than echoing the URL into
+    // the text (which can confuse some models into trying to parse it).
+    ? `An image of the live product UI is attached. Use it as the visual anchor — feature it prominently in a clean mockup. The ad should look like it was made for THIS product, not generic AI ad-art.`
+    : `Use a clean, modern composition that looks like a real product ad — not generic stock art.`
+
   return `Create a high-converting ${p.platform} ad creative.
 
 ${aspectInstructions(p.aspect)}
@@ -34,18 +57,18 @@ ${aspectInstructions(p.aspect)}
 HEADLINE TO OVERLAY (must be readable, bold, high contrast): "${p.headline}"
 ${p.description ? `SUPPORTING COPY: "${p.description}"` : ''}
 
-Brand context (match this product's real UI and tone):
+Brand context (text):
 ${p.brandContext}
-
-${p.referenceImageUrl ? `Use this product screenshot as the visual anchor — feature it prominently in a clean mockup: ${p.referenceImageUrl}` : 'Use a clean, modern composition that looks like a real product ad — not generic stock art.'}
+${p.designTokensPrompt ? `\n${p.designTokensPrompt}\n` : ''}
+${referenceClause}
 
 Requirements:
 - Feels native to ${p.platform}, not AI-slop
-- Use the brand's primary color as accent
-- Headline text must be crisp, legible, and stand out
+- Use the brand's primary color as accent (not as a flood)
+- Headline text must be crisp, legible, high contrast
 - Include a subtle CTA area
 - Avoid: watermarks, lorem ipsum, generic stock people, cliche abstract swirls
-- Prioritize: product UI, concrete outcomes, trustworthy human elements`
+- Prioritize: real product UI elements, concrete outcomes, trustworthy human elements`
 }
 
 export async function generateAdImage(params: ImageGenParams): Promise<GeneratedImage | null> {

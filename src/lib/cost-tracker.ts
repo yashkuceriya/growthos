@@ -31,12 +31,18 @@ export async function trackAICost(entry: CostEntry) {
 }
 
 // Rough cost estimates per 1M tokens (input/output), USD
+// Rough cost estimates per 1M tokens (input/output), USD. Update when
+// you bump model SKUs in lib/ai/models.ts — estimateCost falls back to
+// a generic mid-tier rate if the model isn't listed, but ai_cost_ledger
+// numbers drift if this stays out of sync.
 const MODEL_COSTS: Record<string, { input: number; output: number }> = {
   'google/gemini-2.0-flash-001': { input: 0.075, output: 0.30 },
+  'google/gemini-2.5-flash': { input: 0.30, output: 2.50 },
   'google/gemini-2.5-flash-preview': { input: 0.15, output: 0.60 },
   'google/gemini-3.1-flash-image-preview': { input: 0, output: 0 }, // billed per image, not per token
   'anthropic/claude-sonnet-4': { input: 3.0, output: 15.0 },
   'claude-sonnet-4-5-20250929': { input: 3.0, output: 15.0 },
+  'claude-sonnet-4-6': { input: 3.0, output: 15.0 },
   'openai/gpt-4o-mini': { input: 0.15, output: 0.60 },
 }
 

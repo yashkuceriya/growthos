@@ -121,6 +121,12 @@ export default function ProjectsPage() {
               ?? (bv.hero_image_url as string | null | undefined)
               ?? (Array.isArray(bv.screenshots) ? (bv.screenshots as string[])[0] : null)
               ?? null
+            // Design tokens extracted by the Claude vision pass during ingest.
+            // We surface the palette as small swatches so users see what we
+            // pulled out — visual confirmation the design pipeline ran.
+            const tokens = bv.design_tokens as { color_palette?: { primary?: string; secondary?: string | null; accent?: string | null; background?: string; text?: string }; mood?: string[] } | undefined
+            const palette = tokens?.color_palette
+            const swatches = palette ? [palette.primary, palette.accent, palette.secondary, palette.background, palette.text].filter((c): c is string => !!c) : []
             return (
               <div key={p.id} className={cn('relative overflow-hidden rounded-md border', active ? 'border-emerald-500/40 bg-emerald-500/[0.03]' : 'border-slate-800 bg-slate-900/60')}>
                 {active && <span className="absolute left-0 top-3 bottom-3 w-[2px] rounded-r bg-emerald-400" />}
@@ -157,6 +163,21 @@ export default function ProjectsPage() {
                   <a href={p.website} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[10px] font-mono-data text-emerald-400 hover:text-emerald-300">
                     <Globe className="h-3 w-3" /> {p.website.replace(/^https?:\/\//, '')}
                   </a>
+                )}
+                {swatches.length > 0 && (
+                  <div className="mt-2 flex items-center gap-1.5" title="Design palette extracted by the vision pass — used by ad image generation">
+                    {swatches.slice(0, 5).map((c, i) => (
+                      <span
+                        key={`${c}-${i}`}
+                        className="h-3 w-3 rounded-sm border border-slate-700"
+                        style={{ backgroundColor: c }}
+                        aria-label={`Brand color ${c}`}
+                      />
+                    ))}
+                    {tokens?.mood && tokens.mood.length > 0 && (
+                      <span className="ml-1 text-[10px] text-slate-500">{tokens.mood.slice(0, 2).join(' · ')}</span>
+                    )}
+                  </div>
                 )}
                 <div className="mt-3 flex items-center justify-between">
                   {active ? <StatusPill tone="success">Active</StatusPill> : (

@@ -3,6 +3,7 @@ import { generateAdImage } from '@/lib/ai/ad-studio/image-generator'
 import { trackAICost } from '@/lib/cost-tracker'
 import { modeBlock } from '@/lib/ai/creative/modes'
 import { uploadAdImage } from '@/lib/storage/images'
+import { designTokensPromptBlock, type DesignTokens } from '@/lib/ai/design/extractor'
 
 // Gemini Flash Image pricing via OpenRouter: ~$0.04 per generated image
 const IMAGE_COST_USD = 0.04
@@ -64,6 +65,14 @@ export async function POST(request: Request) {
     (brandVoice.hero_image_url as string | null) ??
     (Array.isArray(brandVoice.screenshots) ? ((brandVoice.screenshots as string[])[0] ?? null) : null)
 
+  // Claude-extracted design tokens (if ingest ran with Anthropic key set).
+  // Renders to a prompt block the image model sees alongside the
+  // reference image — gives concrete hex codes, layout pattern, mood.
+  const designTokens = brandVoice.design_tokens as (DesignTokens & { extracted_at?: string; model?: string }) | undefined
+  const designTokensPrompt = designTokens
+    ? designTokensPromptBlock(designTokens)
+    : null
+
   const requested: Array<'1:1' | '9:16' | '1.91:1'> =
     Array.isArray(aspects) && aspects.length ? aspects : ['1:1', '9:16', '1.91:1']
 
@@ -82,6 +91,7 @@ export async function POST(request: Request) {
         platform: brief.platform,
         brandContext,
         referenceImageUrl,
+        designTokensPrompt,
         aspect,
       })
       if (!img) continue
