@@ -10,6 +10,12 @@
 // in place. The feature is opt-in and never blocks completion.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { ensureBucket } from '@/lib/storage/ensure-bucket'
+
+// Default bucket — auto-created on first use. Without this, completed
+// videos kept the upstream signed URL which expires in 24-48h, leaving
+// the gallery with broken video links.
+const DEFAULT_VIDEO_BUCKET = 'videos'
 
 export interface MirrorResult {
   mirrored: boolean
@@ -21,8 +27,11 @@ export async function mirrorToStorage(
   supabase: SupabaseClient,
   args: { renderId: string; userId: string; sourceUrl: string },
 ): Promise<MirrorResult> {
-  const bucket = process.env.VIDEO_STORAGE_BUCKET
-  if (!bucket) return { mirrored: false }
+  const bucketName = process.env.VIDEO_STORAGE_BUCKET || DEFAULT_VIDEO_BUCKET
+  const bucketReady = await ensureBucket(supabase, bucketName)
+  if (!bucketReady) {
+    return { mirrored: false, error: `bucket "${bucketName}" not available` }
+  }
 
   try {
     const res = await fetch(args.sourceUrl)
@@ -34,27 +43,19 @@ export async function mirrorToStorage(
     const path = `${args.userId}/${args.renderId}.mp4`
 
     const { error: uploadErr } = await supabase.storage
-      .from(bucket)
+      .from(bucketName)
       .upload(path, buf, {
         contentType: 'video/mp4',
         upsert: true,
       })
     if (uploadErr) throw new Error(uploadErr.message)
 
-    const { data } = supabase.storage.from(bucket).getPublicUrl(path)
+    const { data } = supabase.storage.from(bucketName).getPublicUrl(path)
     if (!data?.publicUrl) throw new Error('No public URL returned')
     return { mirrored: true, newUrl: data.publicUrl }
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'mirror failed'
-    // Bucket-not-found is the most common misconfig — make it loud in logs
-    // so the operator sees the missing-bucket gap, not just a generic warn.
-    if (/bucket not found|does not exist|404/i.test(msg)) {
-      console.error(
-        `[video/storage] Bucket "${bucket}" missing — create it in Supabase Storage to enable video mirror, or unset VIDEO_STORAGE_BUCKET to disable. Falling back to upstream URL.`,
-      )
-    } else {
-      console.error('[video/storage] Mirror failed:', msg)
-    }
+    console.error('[video/storage] Mirror failed:', msg)
     return { mirrored: false, error: msg }
   }
 }

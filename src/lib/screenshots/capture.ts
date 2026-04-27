@@ -17,6 +17,12 @@
 // the lib/video/storage.ts pattern.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { ensureBucket } from '@/lib/storage/ensure-bucket'
+
+// Default bucket name when SCREENSHOT_STORAGE_BUCKET is unset. Auto-
+// created via ensureBucket so the system "just works" — no manual
+// Supabase Studio click required.
+const DEFAULT_SCREENSHOT_BUCKET = 'screenshots'
 
 export interface CaptureResult {
   /** Permanent URL (Supabase Storage) if mirrored, else upstream URL. */
@@ -101,16 +107,15 @@ export async function captureScreenshot(
     return null
   }
 
-  // Always mirror to Storage if a bucket is configured. Without a bucket
-  // we'd have to keep the upstream signed URL alive (provider-dependent
-  // TTL), which is fragile for content generation downstream.
-  const bucket = process.env.SCREENSHOT_STORAGE_BUCKET
-  if (!bucket) {
+  // Mirror to Storage. Bucket name from env var, with a sensible default
+  // ('screenshots') so this works without manual configuration. ensureBucket
+  // creates it on first use if missing — self-healing.
+  const bucketName = process.env.SCREENSHOT_STORAGE_BUCKET || DEFAULT_SCREENSHOT_BUCKET
+  const bucketReady = await ensureBucket(supabase, bucketName)
+  if (!bucketReady) {
     console.warn(
-      '[screenshots] SCREENSHOT_STORAGE_BUCKET not set — captured screenshot will not be mirrored. Downstream consumers may lose access when the upstream cache expires.',
+      `[screenshots] could not ensure bucket "${bucketName}". Screenshot will not be mirrored — downstream consumers will lose it after the upstream cache expires.`,
     )
-    // Return the upstream URL anyway — the caller stores it; if it expires
-    // later, a re-ingest will refresh.
     return {
       url: upstreamUrl,
       mirrored: false,
@@ -124,20 +129,14 @@ export async function captureScreenshot(
   const path = `${userId}/${projectId}/${filename}`
 
   const { error: uploadErr } = await supabase.storage
-    .from(bucket)
+    .from(bucketName)
     .upload(path, imageBuffer, {
       contentType: 'image/png',
       upsert: false,
     })
 
   if (uploadErr) {
-    if (/bucket not found|does not exist|404/i.test(uploadErr.message)) {
-      console.error(
-        `[screenshots] Bucket "${bucket}" missing — create it (public read) in Supabase Storage to enable screenshot mirroring, or unset SCREENSHOT_STORAGE_BUCKET. Falling back to upstream URL.`,
-      )
-    } else {
-      console.error('[screenshots] Storage upload failed:', uploadErr.message)
-    }
+    console.error('[screenshots] Storage upload failed:', uploadErr.message)
     return {
       url: upstreamUrl,
       mirrored: false,
@@ -145,7 +144,7 @@ export async function captureScreenshot(
     }
   }
 
-  const { data: pub } = supabase.storage.from(bucket).getPublicUrl(path)
+  const { data: pub } = supabase.storage.from(bucketName).getPublicUrl(path)
   if (!pub?.publicUrl) {
     console.error('[screenshots] No public URL returned from storage')
     return {

@@ -8,6 +8,7 @@
 // logged so misconfiguration surfaces in dev.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { ensureBucket } from './ensure-bucket'
 
 const DEFAULT_BUCKET = 'ad-images'
 
@@ -74,6 +75,12 @@ export async function uploadAdImage(args: UploadAdImageArgs): Promise<string> {
   const ext = extFromMime(mime)
   const safeAspect = args.aspect.replace(/[^a-z0-9]/gi, '_')
   const path = `${args.userId}/${args.adCopyId}/${Date.now()}-${safeAspect}-${args.index ?? 0}.${ext}`
+
+  // Self-heal: create the bucket if missing. Without this, every ad
+  // image fell back to a base64 data URL stored in ad_copies.media_urls
+  // — a 1.6MB row per image, ~5MB row per ad. Found via practical
+  // audit: a single existing row was 1.68MB.
+  await ensureBucket(args.supabase, bucket())
 
   try {
     const { error: uploadErr } = await args.supabase.storage

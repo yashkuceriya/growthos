@@ -265,6 +265,16 @@ supabase/migrations/
   - **Ad Studio detail panel** (`/ad-studio`): button next to Generate Images. Inline `<video>` preview below the image stack.
 - The dispatcher's existing auto-attach (`lib/video/index.ts → attachVideoToParent`) writes `video_url` / `video_render_id` / `video_status` back to the parent row when the render completes — no extra wiring needed.
 
+## Self-healing storage buckets (Bundle HH — no migration)
+- **Why**: continuing the practical audit, found that **zero Storage buckets existed** in the live project. Three env vars (`SCREENSHOT_STORAGE_BUCKET`, `VIDEO_STORAGE_BUCKET`, `IMAGE_STORAGE_BUCKET`) were unset AND no buckets had been created manually. Every code path that tried to upload silently fell back to a less-good behavior:
+  - Ad images: stored as base64 `data:` URLs in `ad_copies.media_urls`. Found a real existing row at **1.68 MB** for one image; three images = ~5MB row. After 50-100 ads, `/ad-studio`'s `select('*')` would OOM the page.
+  - Screenshots: kept the upstream signed URL (24h provider TTL) → design tokens unreachable after the cache expires.
+  - Videos: same upstream URL keeping behavior → completed renders had broken video links after 24-48h.
+- **`lib/storage/ensure-bucket.ts` (new)**: memoized helper that lists buckets on first call per process, creates the bucket public if missing, returns whether it's usable. One round-trip per bucket per process — basically free.
+- **Wired into all three storage paths**: `lib/storage/images.ts → uploadAdImage`, `lib/screenshots/capture.ts`, `lib/video/storage.ts → mirrorToStorage`. Each path now calls `ensureBucket()` before uploading, so missing buckets get created on demand. Default bucket names (`ad-images`, `screenshots`, `videos`) so the system works without any env-var configuration.
+- **Verified end-to-end** against real Supabase: ran the helper against the live project — created all three missing buckets, listBuckets confirms public.
+- **Test mock updates**: `video/storage.test.ts` had to mock `listBuckets` + `createBucket` to play with the new path. Also added `__resetEnsureBucketCache()` so tests don't leak memoization state between cases. The "no env var = no-op" test was replaced with "no env var = falls back to default bucket" which is the new (better) behavior.
+
 ## Practical audit + missing-RPC repair (Bundle GG — migration 025)
 - **Why**: an audit done at the user's prompt — "make sure things actually work" — checked the live database and found three production RPCs missing despite the migrations being on disk and code calling them. Tables existed; functions didn't. Almost certainly because earlier migrations were partially pasted into Supabase Studio (CREATE TABLE only, not the trailing CREATE FUNCTION blocks). All three were silent-failure hazards:
   - `merge_project_brand_voice` (mig 011) missing → every "Sync Site" + every agency agent threw 500. Bundle FF design tokens never persisted because the merge that stores them blew up.
