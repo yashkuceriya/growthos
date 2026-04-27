@@ -265,6 +265,13 @@ supabase/migrations/
   - **Ad Studio detail panel** (`/ad-studio`): button next to Generate Images. Inline `<video>` preview below the image stack.
 - The dispatcher's existing auto-attach (`lib/video/index.ts → attachVideoToParent`) writes `video_url` / `video_render_id` / `video_status` back to the parent row when the render completes — no extra wiring needed.
 
+## Launch concurrency mutex (Bundle LL — migration 026)
+- **Why**: deeper audit found the launch endpoint had no guard against a user clicking the button twice (or running it from two browser tabs). Each launch run spends $1-3 in OpenRouter / Anthropic credits and writes conflicting data via `mergeBrandVoice`. Two concurrent runs = 2× spend + race conditions in `projects.brand_voice.insights` (last-write-wins).
+- **Migration 026**: adds `projects.launch_running_at timestamptz` + a partial index for the rare "any launches in flight?" query.
+- **Atomic claim** at `/api/launch` start: conditional `UPDATE projects SET launch_running_at = now() WHERE id = $1 AND (launch_running_at IS NULL OR launch_running_at < now() - interval '10 minutes') RETURNING id`. A concurrent run sees zero rows updated and gets `409 Conflict` with a `retry_after_seconds: 60` hint. Stale claims (>10 min, presumed crashed worker) can be overwritten so a dead launch doesn't pin the mutex forever.
+- **`finally{}` releases the lock** no matter how the run ends: success, top-level error, budget-exceeded mid-flight. Without this a crashed run would leave the mutex held until the 10-min stale window expires. Also wrapped the orchestrator body in try/catch so a top-level throw (DB drop, OOM) reaches finally cleanly.
+- 10-minute stale window is generous: the longest legitimate run is 3-4 minutes (8 channels in parallel + 4 strategic agents serially).
+
 ## Cross-tenant + silent cost-track failure (Bundle KK — no migration)
 - **Why**: deeper audit pass found two more silent-fail issues that practical testing would catch but unit tests + CI couldn't:
 - **Cross-tenant in `/api/ai/generate-video`**: the route accepted `projectId` and `attachTo: { type, id }` in the body and used them with the **service client** (which bypasses RLS) without verifying ownership. Attack: any authed user could submit `projectId: <victim_project>` and `attachTo: { type: 'ad_copy', id: <victim_ad_id> }` to inject a video into the victim's ad copy AND charge cost against the victim's budget. Adjacent routes (`/api/ai/generate-ad-image`, all `/api/social/*` action routes, all agency routes) were OK because they use the session client + RLS. Fix: explicit `select('id').eq('id', body.projectId).maybeSingle()` against the session client before passing to service-client work — RLS returns null for cross-user rows, route 404s.

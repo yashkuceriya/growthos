@@ -39,6 +39,29 @@ export async function POST(request: Request) {
   const budget = await checkBudget(supabase, projectId)
   if (!budget.ok) return budgetExceededResponse(budget)
 
+  // Per-project launch mutex. Atomically claim the slot — a concurrent
+  // run (second browser tab, accidental double-click) sees zero rows
+  // updated and gets 409. Stale claim (>10min, presumed dead worker)
+  // can be overwritten. We clear the flag in a finally{} at end of run.
+  const staleCutoff = new Date(Date.now() - 10 * 60_000).toISOString()
+  const { data: claimed } = await supabase
+    .from('projects')
+    .update({ launch_running_at: new Date().toISOString() })
+    .eq('id', projectId)
+    .or(`launch_running_at.is.null,launch_running_at.lt.${staleCutoff}`)
+    .select('id')
+    .maybeSingle() as { data: { id: string } | null }
+
+  if (!claimed) {
+    return Response.json(
+      {
+        error: 'A launch is already running for this project. Wait for it to finish, or try again in a few minutes if it appears stuck.',
+        retry_after_seconds: 60,
+      },
+      { status: 409 },
+    )
+  }
+
   const bv = (project.brand_voice as Record<string, unknown>) ?? {}
   const ctx: LaunchContext = {
     productName: project.name,
@@ -65,6 +88,22 @@ export async function POST(request: Request) {
       }
       function close() { if (closed) return; closed = true; try { controller.close() } catch {} }
 
+      // Release the per-project launch mutex no matter how the run
+      // ends — success, error, or budget-exceeded mid-flight. Without
+      // this, a crashed launch would leave the mutex held until the
+      // 10-minute stale-claim window passes, blocking legitimate
+      // re-attempts in the meantime.
+      async function releaseLock() {
+        try {
+          await supabase.from('projects')
+            .update({ launch_running_at: null })
+            .eq('id', projectId)
+        } catch (e) {
+          console.error('[launch] failed to release mutex:', e instanceof Error ? e.message : e)
+        }
+      }
+
+      try {
       // Determine which channels to run based on product vertical
       const classification = (bv.classification as { vertical?: Vertical } | undefined)
       const playbook = getPlaybook(classification?.vertical)
@@ -204,7 +243,16 @@ export async function POST(request: Request) {
       }
 
       send('done', { campaignId })
-      close()
+      } catch (err) {
+        // The orchestrator wraps each step in try/catch already, but a
+        // top-level throw (DB connection drop, OOM) lands here. Surface
+        // and continue to release the mutex.
+        console.error('[launch] orchestrator threw:', err instanceof Error ? err.message : err)
+        send('agent_status', { agent: 'orchestrator', status: 'failed', error: err instanceof Error ? err.message : 'Unknown' })
+      } finally {
+        await releaseLock()
+        close()
+      }
     },
   })
 
