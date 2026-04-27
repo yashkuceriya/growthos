@@ -2,6 +2,8 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 import { rateLimit, clientIp } from '@/lib/rate-limit'
 import { wrapHandler } from '@/lib/api-error'
+import { emitEvent } from '@/lib/webhooks/dispatch'
+import type { LeadCreatedPayload } from '@/lib/webhooks/payloads'
 
 /** Public endpoint — no auth required. Used by landing pages and external forms. */
 async function handlePost(request: Request) {
@@ -89,6 +91,32 @@ async function handlePost(request: Request) {
     lead_id: lead.id,
     event_type: 'captured',
     metadata: { source, ip, ...metadata },
+  })
+
+  const leadPayload: LeadCreatedPayload = {
+    lead_id: lead.id,
+    project_id: projectId,
+    email,
+    name: name || null,
+    source: source || 'direct',
+    source_id: sourceId || null,
+    campaign_id: campaignId ?? null,
+    utm: {
+      source: utm_source ?? null,
+      medium: utm_medium ?? null,
+      campaign: utm_campaign ?? null,
+      content: utm_content ?? null,
+      term: utm_term ?? null,
+    },
+    score: 10,
+    created_at: new Date().toISOString(),
+  }
+  await emitEvent({
+    supabase,
+    userId: project.user_id,
+    projectId,
+    eventType: 'lead.created',
+    payload: leadPayload as unknown as Record<string, unknown>,
   })
 
   return NextResponse.json({ lead_id: lead.id, status: 'new' })

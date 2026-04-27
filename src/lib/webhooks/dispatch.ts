@@ -51,7 +51,13 @@ export interface WebhookDeliveryRow {
 export async function emitEvent(args: {
   supabase: SupabaseClient
   userId: string
-  projectId: string
+  /**
+   * Source project for the event. Pass null if the event has no resolvable
+   * project (e.g. an email bounce whose template has been deleted) — we'll
+   * still fan out to "all projects" subscriptions but skip project-scoped
+   * endpoints since they have no business receiving cross-project signal.
+   */
+  projectId: string | null
   eventType: string
   payload: Record<string, unknown>
 }): Promise<{ created: number }> {
@@ -68,9 +74,7 @@ export async function emitEvent(args: {
 
   if (!endpoints || endpoints.length === 0) return { created: 0 }
 
-  // Filter: an endpoint with project_id=null subscribes to all projects;
-  // otherwise it must match the source project.
-  const matching = endpoints.filter((e) => e.project_id == null || e.project_id === projectId)
+  const matching = endpoints.filter((e) => endpointMatchesProject(e.project_id, projectId))
   if (matching.length === 0) return { created: 0 }
 
   const rows = matching.map((e) => ({
@@ -302,6 +306,22 @@ export async function recoverStuckDeliveries(
   }
 
   return { requeued, exhausted }
+}
+
+/**
+ * Subscription-matching rule, exposed for unit testing. Three cases:
+ *  - endpoint scoped to all projects (project_id null) → matches anything
+ *  - endpoint scoped to a project → matches only that project's events
+ *  - event with no resolvable project (sourceProjectId null) → fans out
+ *    only to all-projects subscriptions, never to scoped ones
+ */
+export function endpointMatchesProject(
+  endpointProjectId: string | null,
+  sourceProjectId: string | null,
+): boolean {
+  if (endpointProjectId == null) return true
+  if (sourceProjectId == null) return false
+  return endpointProjectId === sourceProjectId
 }
 
 // Test-only export (the next-attempt scheduler is the trickiest math).

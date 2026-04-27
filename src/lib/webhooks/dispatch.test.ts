@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 import {
   deliverWebhook,
+  endpointMatchesProject,
   MAX_DELIVERY_ATTEMPTS,
   AUTO_DISABLE_THRESHOLD,
   __testing,
@@ -251,6 +252,30 @@ describe('deliverWebhook outcomes', () => {
     const patch = endpointUpdates[endpointUpdates.length - 1]!.patch
     expect(patch.consecutive_failures).toBe(0)
     expect(patch.last_delivery_status).toBe('success')
+  })
+})
+
+describe('endpointMatchesProject', () => {
+  it('all-projects endpoint matches a scoped event', () => {
+    expect(endpointMatchesProject(null, 'proj-1')).toBe(true)
+  })
+
+  it('all-projects endpoint matches a null-project event', () => {
+    expect(endpointMatchesProject(null, null)).toBe(true)
+  })
+
+  it('scoped endpoint matches its own project', () => {
+    expect(endpointMatchesProject('proj-1', 'proj-1')).toBe(true)
+  })
+
+  it('scoped endpoint does not match a different project', () => {
+    expect(endpointMatchesProject('proj-1', 'proj-2')).toBe(false)
+  })
+
+  it('scoped endpoint does NOT match a null-project event', () => {
+    // Right semantic: a project-scoped subscription has no business
+    // receiving events whose source project is unknown.
+    expect(endpointMatchesProject('proj-1', null)).toBe(false)
   })
 })
 

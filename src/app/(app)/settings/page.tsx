@@ -24,6 +24,9 @@ const SECTIONS = [
 const WEBHOOK_EVENT_OPTIONS = [
   { value: 'ingest.completed', label: 'Ingest completed', hint: 'Project crawl finished — payload includes brand info' },
   { value: 'ingest.failed', label: 'Ingest failed', hint: 'Crawl gave up after retries — payload includes error reason' },
+  { value: 'lead.created', label: 'Lead created', hint: 'New lead captured — payload includes email, source, UTM fields' },
+  { value: 'social.published', label: 'Social published', hint: 'Post went live on a platform — payload includes external_url' },
+  { value: 'email.bounced', label: 'Email bounced', hint: 'Resend returned a bounce — payload includes send_id and subscriber_id' },
 ] as const
 
 const SOCIAL_PLATFORMS = [

@@ -8,6 +8,14 @@ beforeAll(() => {
   process.env.SOCIAL_TOKEN_ENC_KEY = randomBytes(32).toString('base64')
 })
 
+// dispatchPost now fires social.published webhooks on success. The fake
+// supabase below only knows social_posts + social_accounts; rather than
+// teach it about webhook_endpoints/webhook_deliveries, no-op the emit.
+// Webhook fan-out has its own coverage in src/lib/webhooks/dispatch.test.ts.
+vi.mock('@/lib/webhooks/dispatch', () => ({
+  emitEvent: vi.fn(async () => ({ created: 0 })),
+}))
+
 import { encryptToken } from './encryption'
 import { dispatchPost, MAX_PUBLISH_ATTEMPTS } from './index'
 import type { SocialPostRow } from './types'

@@ -265,6 +265,16 @@ supabase/migrations/
   - **Ad Studio detail panel** (`/ad-studio`): button next to Generate Images. Inline `<video>` preview below the image stack.
 - The dispatcher's existing auto-attach (`lib/video/index.ts → attachVideoToParent`) writes `video_url` / `video_render_id` / `video_status` back to the parent row when the render completes — no extra wiring needed.
 
+## More webhook events (Bundle U — no migration)
+- Adds `lead.created`, `social.published`, `email.bounced` to `SUPPORTED_EVENTS`. Total 5 events shipping now.
+- **Wire-ins**:
+  - `/api/leads/capture` emits `lead.created` after the new-lead insert (skipped on the dedup path — that's a re-engagement, not a new lead).
+  - `lib/deploy/index.ts → dispatchPost` emits `social.published` on publish-success (fires from both cron-tick and manual publish).
+  - `/api/webhooks/email` emits `email.bounced` from the Resend bounce handler. Resolves project_id by joining `email_sends.template_id → email_templates.project_id`; passes `null` if the template has been deleted.
+- **`emitEvent` now accepts `projectId: string | null`** for events whose source project can't be resolved. Filter rule extracted to `endpointMatchesProject(endpointProjectId, sourceProjectId)`: a null source project fans out only to all-projects subscriptions (never to scoped ones — a project-scoped sub has no business receiving cross-project signal). 5-test matrix covers the rule.
+- **Typed payload contracts** in `lib/webhooks/payloads.ts`. Each event has a TS interface (`LeadCreatedPayload`, `SocialPublishedPayload`, `EmailBouncedPayload`, etc.) that callers cast through to keep field names stable. Treat as the public contract — bump to a new event name (e.g. `lead.created.v2`) if you need a breaking change.
+- Settings UI's create-form event list grew to all 5 events.
+
 ## Webhook UI (Bundle T — no migration)
 - Settings page (`/settings`) gains a **Webhooks** section between API Keys and Social Accounts. Lists endpoints with status pill (Active/Disabled), failure-streak warning, scope tag (All projects vs project name), and per-event tags.
 - **Inline deliveries panel**: clicking a row expands the most recent 50 deliveries with status pill (success/info/warn), event type, HTTP response code, attempt count, timestamp, and error string. Cached client-side per endpoint id; doesn't auto-refresh.

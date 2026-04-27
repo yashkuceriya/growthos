@@ -1,6 +1,8 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { Webhook } from 'svix'
 import { wrapHandler } from '@/lib/api-error'
+import { emitEvent } from '@/lib/webhooks/dispatch'
+import type { EmailBouncedPayload } from '@/lib/webhooks/payloads'
 
 export const runtime = 'nodejs'
 
@@ -65,9 +67,44 @@ async function handlePost(request: Request) {
 
     case 'email.bounced': {
       await supabase.from('email_sends').update({ status: 'bounced' }).eq('id', sendId)
-      const { data: send } = await supabase.from('email_sends').select('subscriber_id').eq('id', sendId).maybeSingle()
+      // Pull user_id (for emitEvent fan-out) and template_id (so we can look
+      // up project_id) alongside subscriber_id. email_sends doesn't carry
+      // project_id directly — it lives on the parent template.
+      const { data: send } = await supabase
+        .from('email_sends')
+        .select('user_id, subscriber_id, template_id')
+        .eq('id', sendId)
+        .maybeSingle() as { data: { user_id: string; subscriber_id: string | null; template_id: string | null } | null }
       if (send?.subscriber_id) {
         await supabase.from('email_subscribers').update({ status: 'bounced' }).eq('id', send.subscriber_id)
+      }
+      if (send?.user_id) {
+        let projectId: string | null = null
+        if (send.template_id) {
+          const { data: tpl } = await supabase
+            .from('email_templates')
+            .select('project_id')
+            .eq('id', send.template_id)
+            .maybeSingle() as { data: { project_id: string } | null }
+          projectId = tpl?.project_id ?? null
+        }
+        const bouncedPayload: EmailBouncedPayload = {
+          send_id: sendId,
+          project_id: projectId,
+          subscriber_id: send.subscriber_id,
+          template_id: send.template_id,
+          bounced_at: now,
+        }
+        // A null projectId fans out only to all-projects subscriptions —
+        // see emitEvent's filter rule. Right semantics for an email event
+        // whose template has been deleted.
+        await emitEvent({
+          supabase,
+          userId: send.user_id,
+          projectId,
+          eventType: 'email.bounced',
+          payload: bouncedPayload as unknown as Record<string, unknown>,
+        })
       }
       break
     }

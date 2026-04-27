@@ -7,6 +7,9 @@
 export const SUPPORTED_EVENTS = [
   'ingest.completed',
   'ingest.failed',
+  'lead.created',
+  'social.published',
+  'email.bounced',
 ] as const
 
 export type SupportedEvent = (typeof SUPPORTED_EVENTS)[number]

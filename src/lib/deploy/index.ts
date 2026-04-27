@@ -15,6 +15,8 @@ import { decryptToken } from './encryption'
 import { publishTweet } from './twitter'
 import { publishLinkedInPost } from './linkedin'
 import type { PublishResult, SocialAccountRow, SocialPostRow } from './types'
+import { emitEvent } from '@/lib/webhooks/dispatch'
+import type { SocialPublishedPayload } from '@/lib/webhooks/payloads'
 
 export const MAX_PUBLISH_ATTEMPTS = 3
 
@@ -180,6 +182,23 @@ export async function dispatchPost(
       .from('social_accounts')
       .update({ last_publish_at: new Date().toISOString(), last_error: null })
       .eq('id', account.id)
+
+    const publishedPayload: SocialPublishedPayload = {
+      post_id: claimed.id,
+      project_id: claimed.project_id,
+      platform: claimed.platform,
+      external_id: result.externalId,
+      external_url: result.externalUrl ?? null,
+      published_at: new Date().toISOString(),
+    }
+    await emitEvent({
+      supabase,
+      userId: claimed.user_id,
+      projectId: claimed.project_id,
+      eventType: 'social.published',
+      payload: publishedPayload as unknown as Record<string, unknown>,
+    })
+
     return {
       ok: true,
       externalId: result.externalId,
