@@ -96,13 +96,23 @@ export default function ProjectsPage() {
 
       {projects.length === 0 ? (
         <SectionPanel>
-          <div className="flex flex-col items-center justify-center py-12">
+          <div className="flex flex-col items-center justify-center py-12 text-center">
             <Folder className="h-10 w-10 text-slate-600 mb-3" />
-            <p className="text-sm text-slate-400">No projects yet. Create one to get started.</p>
+            <h3 className="text-base font-semibold text-slate-100">Create your first project</h3>
+            <p className="mt-1 max-w-md text-sm text-slate-400">
+              A project = one product you&apos;re marketing. Add your URL, run a sync, and GrowthOS extracts brand info, captures a UI screenshot, and grounds every ad / post / email in your real product.
+            </p>
+            <button
+              onClick={() => setOpen(true)}
+              className="mt-4 inline-flex items-center gap-2 rounded-md bg-emerald-500 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-slate-950 hover:bg-emerald-400"
+            >
+              <Plus className="h-4 w-4" />
+              New project
+            </button>
           </div>
         </SectionPanel>
       ) : (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {projects.map((p) => {
             const active = activeProject?.id === p.id
             const bv = (p.brand_voice as Record<string, unknown> | null) ?? {}

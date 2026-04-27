@@ -10,7 +10,8 @@ import { SectionPanel } from '@/components/ui/section-panel'
 import { Sparkline } from '@/components/ui/sparkline'
 import { Plus, Zap, Upload, Sparkles, Megaphone, AlertTriangle, CheckCircle2, FileText, Send, Globe, Activity } from 'lucide-react'
 import { AllProjectsGrid } from '@/components/dashboard/all-projects-grid'
-import type { IntegrationHealth, DashboardActivity } from '@/app/api/dashboard/health/route'
+import { SetupChecklist, buildSteps } from '@/components/dashboard/setup-checklist'
+import type { IntegrationHealth, DashboardActivity, SetupChecklistState } from '@/app/api/dashboard/health/route'
 
 interface KpiData {
   activeCampaigns: number
@@ -45,6 +46,7 @@ export default function DashboardPage() {
   const [kpi, setKpi] = useState<KpiData | null>(null)
   const [activity, setActivity] = useState<DashboardActivity[]>([])
   const [integrations, setIntegrations] = useState<IntegrationHealth[]>([])
+  const [setup, setSetup] = useState<SetupChecklistState | null>(null)
   // Initial true so the first render shows skeletons; flips to false when
   // the fetch resolves (no synchronous setState inside the effect body).
   const [healthLoading, setHealthLoading] = useState(true)
@@ -58,6 +60,7 @@ export default function DashboardPage() {
         setKpi(j.kpi)
         setActivity(j.activity ?? [])
         setIntegrations(j.integrations ?? [])
+        setSetup(j.setup ?? null)
         setHealthLoading(false)
       })
       .catch(() => setHealthLoading(false))
@@ -69,7 +72,7 @@ export default function DashboardPage() {
       <PageShell>
         <div className="space-y-6 animate-pulse">
           <div className="h-16 rounded-md bg-slate-800/60" />
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[...Array(4)].map((_, i) => <div key={i} className="h-28 rounded-md bg-slate-800/60" />)}
           </div>
         </div>
@@ -100,7 +103,7 @@ export default function DashboardPage() {
   return (
     <PageShell>
       {/* Status bar */}
-      <div className="mb-6 flex items-center gap-3 rounded-md border border-slate-800 bg-slate-900/60 p-3">
+      <div className="mb-6 flex flex-wrap items-center gap-3 rounded-md border border-slate-800 bg-slate-900/60 p-3">
         <div className="flex items-center gap-2 px-2">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Active Project</span>
           <span className="flex items-center gap-1.5 text-xs font-mono-data text-emerald-300">
@@ -120,13 +123,23 @@ export default function DashboardPage() {
         </Link>
       </div>
 
+      {/* Activation guide — auto-hides once all steps done */}
+      {setup && activeProject && (
+        <SetupChecklist
+          steps={buildSteps(
+            { name: activeProject.name, website: activeProject.website, brand_voice: activeProject.brand_voice },
+            setup,
+          )}
+        />
+      )}
+
       {/* All projects at a glance */}
       <div className="mb-6">
         <AllProjectsGrid />
       </div>
 
       {/* Real KPI grid — only metrics we actually track. */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <StatCard
           label="Active Campaigns"
           value={kpi ? String(kpi.activeCampaigns) : '—'}
@@ -150,9 +163,9 @@ export default function DashboardPage() {
       </div>
 
       {/* Bottom row */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <SectionPanel
-          className="col-span-2"
+          className="md:col-span-2"
           title="Recent Activity"
           action={<Link href="/observability" className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400 hover:text-emerald-300">Observability →</Link>}
         >

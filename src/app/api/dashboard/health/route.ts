@@ -38,6 +38,13 @@ interface Stats {
   leadsDaily: number[]
 }
 
+export interface SetupChecklistState {
+  hasWebsite: boolean
+  hasSiteSync: boolean
+  hasFirstAd: boolean
+  hasFirstCampaign: boolean
+}
+
 async function handleGet(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -49,9 +56,10 @@ async function handleGet(request: Request) {
   // since env vars are per-deployment, not per-project.
 
   const integrations = computeIntegrations()
-  const [activity, kpi] = await Promise.all([
+  const [activity, kpi, setup] = await Promise.all([
     fetchActivity(supabase, projectId),
     fetchKpi(supabase, user.id, projectId),
+    projectId ? fetchSetupState(supabase, projectId) : Promise.resolve(null),
   ])
 
   // Anchor "OpenRouter ok" to actual usage in the last 30 days.
@@ -71,7 +79,42 @@ async function handleGet(request: Request) {
     }
   }
 
-  return Response.json({ integrations, activity, kpi })
+  return Response.json({ integrations, activity, kpi, setup })
+}
+
+async function fetchSetupState(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  projectId: string,
+): Promise<SetupChecklistState> {
+  const [{ data: project }, { count: adCount }, { count: campaignCount }] = await Promise.all([
+    supabase
+      .from('projects')
+      .select('website, brand_voice')
+      .eq('id', projectId)
+      .maybeSingle() as unknown as Promise<{ data: { website: string | null; brand_voice: Record<string, unknown> | null } | null }>,
+    supabase
+      .from('ad_copies')
+      .select('id, ad_briefs!inner(project_id)', { count: 'exact', head: true })
+      .eq('ad_briefs.project_id', projectId),
+    supabase
+      .from('campaigns')
+      .select('id', { count: 'exact', head: true })
+      .eq('project_id', projectId),
+  ])
+
+  const bv = project?.brand_voice ?? {}
+  const hasSyncedBrand = !!(
+    (bv as Record<string, unknown>).tagline ||
+    (bv as Record<string, unknown>).value_proposition ||
+    (bv as Record<string, unknown>).captured_screenshot
+  )
+
+  return {
+    hasWebsite: !!project?.website,
+    hasSiteSync: hasSyncedBrand,
+    hasFirstAd: (adCount ?? 0) > 0,
+    hasFirstCampaign: (campaignCount ?? 0) > 0,
+  }
 }
 
 function computeIntegrations(): IntegrationHealth[] {

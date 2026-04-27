@@ -76,6 +76,34 @@ export default function LaunchPage() {
     director: { status: 'pending' }, analytics: { status: 'pending' },
   })
 
+  // Run-cost transparency: capture the wall-clock at launch start, then
+  // sum ai_cost_ledger entries created since for the same project. Lets
+  // the operator see what each Launch run actually spent in OpenRouter
+  // / Anthropic credits — and which model fired for each agent.
+  interface CostBreakdownRow { module: string; model: string | null; cost: number; calls: number }
+  const [costBreakdown, setCostBreakdown] = useState<{ total: number; rows: CostBreakdownRow[] } | null>(null)
+  const launchStartRef = useState<{ at: string | null }>({ at: null })[0]
+
+  async function refreshCost(projectId: string, sinceIso: string) {
+    const { data } = await supabase
+      .from('ai_cost_ledger')
+      .select('module, model, cost_usd')
+      .eq('project_id', projectId)
+      .gte('created_at', sinceIso) as { data: Array<{ module: string; model: string | null; cost_usd: number | null }> | null }
+    if (!data) return
+    const buckets = new Map<string, CostBreakdownRow>()
+    for (const r of data) {
+      const key = `${r.module}|${r.model ?? ''}`
+      const existing = buckets.get(key) ?? { module: r.module, model: r.model, cost: 0, calls: 0 }
+      existing.cost += r.cost_usd ?? 0
+      existing.calls += 1
+      buckets.set(key, existing)
+    }
+    const rows = Array.from(buckets.values()).sort((a, b) => b.cost - a.cost)
+    const total = rows.reduce((s, r) => s + r.cost, 0)
+    setCostBreakdown({ total: Math.round(total * 10000) / 10000, rows })
+  }
+
   const bv = activeProject ? (activeProject as unknown as { brand_voice?: Record<string, unknown> }).brand_voice ?? {} : {}
   const hasBrandVoice = typeof bv === 'object' && bv !== null && Object.keys(bv).length > 2
 
@@ -133,6 +161,8 @@ export default function LaunchPage() {
     setLaunching(true)
     setStates(Object.fromEntries(CHANNELS.map((c) => [c.key, { status: 'generating' as ChannelStatus }])) as Record<ChannelKey, ChannelState>)
     setLog([])
+    setCostBreakdown(null)
+    launchStartRef.at = new Date().toISOString()
     appendLog(`Launching campaign for ${activeProject.name}...`)
 
     try {
@@ -170,6 +200,9 @@ export default function LaunchPage() {
               appendLog(`Campaign launch complete.`)
               toast.success('Campaign launched')
               await refreshAssets(activeProject.id)
+              if (launchStartRef.at) {
+                await refreshCost(activeProject.id, launchStartRef.at)
+              }
             }
           } catch { /* ignore */ }
         }
@@ -371,11 +404,49 @@ export default function LaunchPage() {
           <span className="flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" /><span className="font-mono-data text-emerald-300">{readyCount} ready</span></span>
           {failedCount > 0 && <span className="flex items-center gap-1.5"><AlertCircle className="h-3.5 w-3.5 text-rose-400" /><span className="font-mono-data text-rose-300">{failedCount} failed</span></span>}
           {launching && <span className="flex items-center gap-1.5"><Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-400" /><span className="font-mono-data text-slate-400">in progress</span></span>}
+          {costBreakdown && (
+            <span className="flex items-center gap-1.5">
+              <span className="font-mono-data text-slate-500">Spent</span>
+              <span className="font-mono-data text-slate-200">${costBreakdown.total.toFixed(4)}</span>
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Run cost breakdown — appears after the launch finishes. Shows
+          which agent / channel cost what, and which model fired (so the
+          operator can see Claude vs Gemini fallback transparency). */}
+      {costBreakdown && costBreakdown.rows.length > 0 && (
+        <div className="mb-6 rounded-md border border-slate-800 bg-slate-900/40 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-100">This run cost <span className="font-mono-data text-emerald-300">${costBreakdown.total.toFixed(4)}</span></h2>
+            <span className="font-mono-data text-[10px] text-slate-500">{costBreakdown.rows.reduce((s, r) => s + r.calls, 0)} model calls</span>
+          </div>
+          <table className="w-full border-collapse text-[11px]">
+            <thead>
+              <tr className="text-left text-slate-500">
+                <th className="border-b border-slate-800 py-1 pr-3 font-mono-data">module</th>
+                <th className="border-b border-slate-800 py-1 pr-3 font-mono-data">model</th>
+                <th className="border-b border-slate-800 py-1 pr-3 font-mono-data text-right">calls</th>
+                <th className="border-b border-slate-800 py-1 font-mono-data text-right">cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {costBreakdown.rows.map((r) => (
+                <tr key={`${r.module}-${r.model ?? ''}`}>
+                  <td className="border-b border-slate-900 py-1 pr-3 font-mono-data text-slate-200">{r.module}</td>
+                  <td className="border-b border-slate-900 py-1 pr-3 font-mono-data text-slate-400">{r.model ?? '—'}</td>
+                  <td className="border-b border-slate-900 py-1 pr-3 font-mono-data text-slate-400 text-right">{r.calls}</td>
+                  <td className="border-b border-slate-900 py-1 font-mono-data text-emerald-300 text-right">${r.cost.toFixed(4)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
       {/* Channel grid */}
-      <div className="grid grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         {CHANNELS.map((c) => {
           const state = states[c.key]
           const channelAssets = assets[c.key] ?? []
