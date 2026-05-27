@@ -12,6 +12,7 @@ import { PageHeader } from '@/components/ui/page-header'
 import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { cn } from '@/lib/utils'
+import Link from 'next/link'
 
 interface CampaignMetric {
   id: string
@@ -30,8 +31,9 @@ interface AICostEntry {
   module: string
   model: string
   cost_usd: number
-  tokens?: number
-  latency_ms?: number
+  input_tokens?: number | null
+  output_tokens?: number | null
+  latency_ms?: number | null
   created_at: string
 }
 
@@ -75,13 +77,24 @@ export default function AnalyticsPage() {
     const campaignIds = (campaigns ?? []).map((c: { id: string }) => c.id)
 
     if (campaignIds.length > 0) {
-      const { data } = await supabase.from('campaign_metrics').select('*').in('campaign_id', campaignIds).gte('date', startDate).lte('date', endDate).order('date', { ascending: true })
+      const { data } = await supabase
+        .from('campaign_metrics')
+        .select('id, campaign_id, channel, date, impressions, clicks, conversions, spend, revenue')
+        .in('campaign_id', campaignIds)
+        .gte('date', startDate)
+        .lte('date', endDate)
+        .order('date', { ascending: true })
       setMetrics((data as CampaignMetric[]) ?? [])
     } else {
       setMetrics([])
     }
 
-    const { data: costsData } = await supabase.from('ai_cost_ledger').select('*').eq('project_id', activeProject.id).order('created_at', { ascending: false })
+    const { data: costsData } = await supabase
+      .from('ai_cost_ledger')
+      .select('id, module, model, cost_usd, input_tokens, output_tokens, latency_ms, created_at')
+      .eq('project_id', activeProject.id)
+      .order('created_at', { ascending: false })
+      .limit(50)
     setAiCosts((costsData as AICostEntry[]) ?? [])
 
     try {
@@ -100,6 +113,16 @@ export default function AnalyticsPage() {
     }),
     { impressions: 0, clicks: 0, conversions: 0, spend: 0 }
   ), [metrics])
+
+  const derived = useMemo(() => {
+    const { impressions, clicks, conversions, spend } = totals
+    return {
+      ctr: impressions > 0 ? clicks / impressions : null,
+      convRate: clicks > 0 ? conversions / clicks : null,
+      cpc: clicks > 0 ? spend / clicks : null,
+      cpl: conversions > 0 ? spend / conversions : null,
+    }
+  }, [totals])
 
   const spendByChannel = useMemo(() => {
     const map: Record<string, number> = {}
@@ -131,58 +154,71 @@ export default function AnalyticsPage() {
       <PageHeader
         title="Performance Overview"
         subtitle={
-          <span className="flex items-center gap-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs">Live data stream active — Last updated: {format(new Date(), 'HH:mm:ss')} UTC</span>
+          <span className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+            <span>
+              Manual channel metrics from{' '}
+              <Link href="/campaigns" className="text-emerald-400 hover:text-emerald-300">campaigns</Link>
+              {' '}· AI spend from ledger · Lead attribution when available
+            </span>
           </span>
         }
         actions={
-          <div className="flex items-center gap-2">
-            <div className="flex rounded-md border border-slate-700 bg-slate-800/60 p-0.5">
-              {RANGES.map((r) => (
-                <button
-                  key={r.key}
-                  onClick={() => setRange(r.key)}
-                  className={cn(
-                    'rounded px-2.5 py-1 text-xs font-semibold uppercase tracking-wider',
-                    range === r.key ? 'bg-emerald-500/15 text-emerald-300' : 'text-slate-400 hover:text-slate-200'
-                  )}
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-            <button className="rounded-md border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-800">
-              Custom Range
-            </button>
+          <div className="flex rounded-md border border-slate-700 bg-slate-800/60 p-0.5">
+            {RANGES.map((r) => (
+              <button
+                key={r.key}
+                type="button"
+                onClick={() => setRange(r.key)}
+                className={cn(
+                  'rounded px-2.5 py-1 text-xs font-semibold uppercase tracking-wider',
+                  range === r.key ? 'bg-emerald-500/15 text-emerald-300' : 'text-slate-400 hover:text-slate-200',
+                )}
+              >
+                {r.label}
+              </button>
+            ))}
           </div>
         }
       />
 
-      {/* KPI cards with progress bars */}
-      <div className="grid grid-cols-4 gap-4 mb-4">
+      {metrics.length === 0 && (
+        <div className="mb-4 rounded-md border border-amber-500/25 bg-amber-500/5 px-4 py-3 text-sm text-slate-300">
+          No <code className="text-amber-200/90">campaign_metrics</code> rows in this window. Open a{' '}
+          <Link href="/campaigns" className="text-emerald-400 hover:text-emerald-300">campaign</Link>
+          {' '}and use <strong className="text-slate-200">Log metrics</strong> to populate charts.
+        </div>
+      )}
+
+      {/* KPI totals from logged campaign_metrics only — no fabricated deltas */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-2">
         {[
-          { label: 'Impressions', value: fmtNum(totals.impressions), delta: '+12.4%', tone: 'success' as const, pct: 65, color: 'bg-emerald-400' },
-          { label: 'Clicks', value: fmtNum(totals.clicks), delta: '+4.1%', tone: 'success' as const, pct: 48, color: 'bg-emerald-400' },
-          { label: 'Conversions', value: fmtNum(totals.conversions), delta: '-0.8%', tone: 'error' as const, pct: 35, color: 'bg-cyan-400' },
-          { label: 'Total Spend', value: `$${totals.spend.toLocaleString(undefined, { maximumFractionDigits: 2 })}`, delta: 'Optimized', tone: 'success' as const, pct: 72, color: 'bg-emerald-400' },
+          { label: 'Impressions', value: fmtNum(totals.impressions) },
+          { label: 'Clicks', value: fmtNum(totals.clicks) },
+          { label: 'Conversions', value: fmtNum(totals.conversions) },
+          { label: 'Spend (logged)', value: `$${totals.spend.toLocaleString(undefined, { maximumFractionDigits: 2 })}` },
         ].map((k) => (
-          <div key={k.label} className="rounded-md border border-slate-800 bg-slate-900/60 p-4 flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{k.label}</span>
-              <StatusPill tone={k.tone}>{k.delta}</StatusPill>
-            </div>
-            <div className="font-mono-data text-2xl font-semibold text-slate-100">{k.value}</div>
-            <div className="h-1 w-full overflow-hidden rounded-full bg-slate-800">
-              <div className={`h-full ${k.color}`} style={{ width: `${k.pct}%` }} />
-            </div>
+          <div key={k.label} className="rounded-md border border-slate-800 bg-slate-900/60 p-4">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{k.label}</span>
+            <div className="mt-1 font-mono-data text-2xl font-semibold text-slate-100">{k.value}</div>
           </div>
         ))}
       </div>
+      <p className="mb-4 text-[11px] text-slate-500">
+        {(() => {
+          const parts: string[] = []
+          if (derived.ctr != null) parts.push(`CTR ${(derived.ctr * 100).toFixed(2)}%`)
+          if (derived.convRate != null) parts.push(`Click→convert ${(derived.convRate * 100).toFixed(2)}%`)
+          if (derived.cpc != null) parts.push(`CPC $${derived.cpc.toFixed(2)}`)
+          if (derived.cpl != null) parts.push(`CPL $${derived.cpl.toFixed(2)}`)
+          if (parts.length > 0) return parts.join(' · ')
+          if (metrics.length > 0) return 'Add impressions, clicks, and spend across rows to compute rates.'
+          return '—'
+        })()}
+      </p>
 
       {/* Chart row */}
       <div className="grid grid-cols-3 gap-4 mb-4">
-        <SectionPanel title="Spend by Channel" action={<button className="text-slate-500 hover:text-slate-300">⋯</button>}>
+        <SectionPanel title="Spend by Channel">
           {spendByChannel.length === 0 ? (
             <p className="text-sm text-slate-500 py-8 text-center">No spend data for this period</p>
           ) : (
@@ -204,13 +240,7 @@ export default function AnalyticsPage() {
 
         <SectionPanel
           className="col-span-2"
-          title="Daily Growth Trend"
-          action={
-            <div className="flex items-center gap-3 text-[10px] font-semibold uppercase tracking-wider">
-              <span className="flex items-center gap-1 text-emerald-400"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />Growth</span>
-              <span className="flex items-center gap-1 text-slate-400"><span className="h-1.5 w-1.5 rounded-full bg-slate-500" />Target</span>
-            </div>
-          }
+          title="Daily impressions (logged)"
         >
           {dailyData.length === 0 ? (
             <p className="text-sm text-slate-500 py-12 text-center">No trend data for this period</p>
@@ -330,42 +360,36 @@ export default function AnalyticsPage() {
         </>
       )}
 
-      {/* AI cost breakdown table */}
-      <SectionPanel
-        title={<span className="flex items-center gap-2">AI Engine Cost Breakdown <StatusPill tone="accent">AI OPTIMIZING</StatusPill></span>}
-        action={<div className="flex items-center gap-3 text-slate-500"><button className="hover:text-slate-300">↓</button><button className="hover:text-slate-300">▾</button></div>}
-        contentClassName="p-0"
-      >
+      {/* AI cost — real ledger rows only */}
+      <SectionPanel title="AI cost (recent)" contentClassName="p-0">
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-800">
-                <th className="px-4 py-2.5 text-left">ID</th>
-                <th className="px-4 py-2.5 text-left">Channel Name</th>
-                <th className="px-4 py-2.5 text-left">LLM Model</th>
-                <th className="px-4 py-2.5 text-right">Token Usage</th>
-                <th className="px-4 py-2.5 text-right">Processing Time</th>
-                <th className="px-4 py-2.5 text-right">Total Cost</th>
-                <th className="px-4 py-2.5 text-right">Efficiency</th>
+                <th className="px-4 py-2.5 text-left">Time</th>
+                <th className="px-4 py-2.5 text-left">Module</th>
+                <th className="px-4 py-2.5 text-left">Model</th>
+                <th className="px-4 py-2.5 text-right">Tokens</th>
+                <th className="px-4 py-2.5 text-right">Latency</th>
+                <th className="px-4 py-2.5 text-right">Cost</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
-              {aiCosts.slice(0, 10).map((c, i) => {
-                const eff = Math.min(99, 80 + (i * 2))
+              {aiCosts.slice(0, 20).map((c) => {
+                const tok = (c.input_tokens ?? 0) + (c.output_tokens ?? 0)
                 return (
                   <tr key={c.id} className="hover:bg-slate-800/40">
-                    <td className="px-4 py-2.5 font-mono-data text-slate-500">#OS-{(9921 + i).toString()}</td>
+                    <td className="px-4 py-2.5 font-mono-data text-slate-500">{format(new Date(c.created_at), 'MMM d HH:mm')}</td>
                     <td className="px-4 py-2.5 font-semibold text-slate-100">{c.module}</td>
                     <td className="px-4 py-2.5 text-slate-400">{c.model}</td>
-                    <td className="px-4 py-2.5 text-right font-mono-data text-slate-300">{c.tokens ? fmtNum(c.tokens) : '—'}</td>
-                    <td className="px-4 py-2.5 text-right font-mono-data text-slate-300">{c.latency_ms ? (c.latency_ms / 1000).toFixed(1) + 's' : '—'}</td>
-                    <td className="px-4 py-2.5 text-right font-mono-data text-emerald-400">${c.cost_usd.toFixed(2)}</td>
-                    <td className="px-4 py-2.5 text-right"><StatusPill tone={eff > 95 ? 'success' : 'warn'}>{eff}%</StatusPill></td>
+                    <td className="px-4 py-2.5 text-right font-mono-data text-slate-300">{tok > 0 ? fmtNum(tok) : '—'}</td>
+                    <td className="px-4 py-2.5 text-right font-mono-data text-slate-300">{c.latency_ms ? `${(c.latency_ms / 1000).toFixed(1)}s` : '—'}</td>
+                    <td className="px-4 py-2.5 text-right font-mono-data text-emerald-400">${c.cost_usd.toFixed(4)}</td>
                   </tr>
                 )
               })}
               {aiCosts.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500">No AI cost data yet</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500">No AI cost rows yet for this project.</td></tr>
               )}
             </tbody>
           </table>

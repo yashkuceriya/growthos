@@ -3,6 +3,7 @@ import { runAdPipeline } from '@/lib/ai/ad-studio/iterator'
 import { extractInsights, saveInsights } from '@/lib/ai/ad-studio/insight-extractor'
 import { trackAICost, estimateCost } from '@/lib/cost-tracker'
 import { modeBlock } from '@/lib/ai/creative/modes'
+import { getMarketingMemory, marketingMemoryPrompt } from '@/lib/marketing/memory'
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -15,10 +16,38 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json()
-  const { projectId, platform, audienceSegment, productOffer, campaignGoal, tone, creativeMode } = body
+  const {
+    projectId,
+    platform,
+    audienceSegment,
+    productOffer,
+    campaignGoal,
+    tone,
+    creativeMode,
+    campaignId: rawCampaignId,
+  } = body
 
   if (!projectId || !audienceSegment || !productOffer || !campaignGoal) {
     return Response.json({ error: 'Missing required fields' }, { status: 400 })
+  }
+
+  let resolvedCampaignId: string | null = null
+  if (rawCampaignId != null && String(rawCampaignId).trim() !== '') {
+    if (typeof rawCampaignId !== 'string') {
+      return Response.json({ error: 'Invalid campaignId' }, { status: 400 })
+    }
+    const cid = rawCampaignId.trim()
+    const { data: camp } = await supabase
+      .from('campaigns')
+      .select('id')
+      .eq('id', cid)
+      .eq('user_id', user.id)
+      .eq('project_id', projectId)
+      .maybeSingle()
+    if (!camp) {
+      return Response.json({ error: 'Campaign not found' }, { status: 404 })
+    }
+    resolvedCampaignId = cid
   }
 
   // Normalize goal to match DB check constraint (awareness | conversion | engagement)
@@ -30,31 +59,27 @@ export async function POST(request: Request) {
   }
   const normalizedGoal = normalizeGoal(campaignGoal)
 
-  // Fetch project for brand voice
-  const { data: project } = await supabase
-    .from('projects')
-    .select('brand_voice, settings')
-    .eq('id', projectId)
-    .maybeSingle()
+  // Unified marketing memory — one bundle covering brand, classification,
+  // blueprint, launch insights, ad insights, founder voice, and proven
+  // style references for ad copy. Replaces ad-hoc fetches that each route
+  // used to do on its own (and disagreed on what to include).
+  const memory = await getMarketingMemory({
+    supabase,
+    userId: user.id,
+    projectId,
+    assetKind: 'ad_copy',
+  })
 
-  const baseBrandVoice =
-    typeof project?.brand_voice === 'string'
-      ? project.brand_voice
-      : JSON.stringify(project?.brand_voice ?? {})
-  // Splice the creative-mode directive into the brand voice context the
-  // generator already passes through. No iterator/generator signature
-  // change needed — the directive becomes part of the system prompt.
-  const brandVoice = baseBrandVoice + modeBlock(creativeMode, 'copy')
+  // System-prompt block: brand + blueprint + insights + founder voice +
+  // style refs. Append the creative-mode directive so a "funny ad" still
+  // gets the funny angle baked into the same prompt.
+  const brandVoice = marketingMemoryPrompt(memory, 'ad_copy') + modeBlock(creativeMode, 'copy')
 
-  // Fetch existing insights for this project
-  const { data: insights } = await supabase
-    .from('ad_insights')
-    .select('insight_text')
-    .eq('project_id', projectId)
-    .eq('active', true)
-    .limit(5)
-
-  const insightTexts = insights?.map((i) => i.insight_text) ?? []
+  // Ad insights are inside the prompt block via memory, but the iterator
+  // also threads them through `insights` so the user message reinforces
+  // them next to the brief. Kept for backward compat with the generator
+  // signature.
+  const insightTexts = memory.adInsights.map((i) => i.text)
 
   // Stream progress via SSE
   const encoder = new TextEncoder()
@@ -80,6 +105,7 @@ export async function POST(request: Request) {
           .insert({
             user_id: user.id,
             project_id: projectId,
+            campaign_id: resolvedCampaignId,
             platform: platform || 'meta',
             audience_segment: audienceSegment,
             product_offer: productOffer,

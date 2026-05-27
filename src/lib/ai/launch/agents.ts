@@ -6,6 +6,7 @@ import { generateObject } from 'ai'
 import { modelFor, modelLabel } from '@/lib/ai/models'
 import { z } from 'zod'
 import type { LaunchContext } from './generators'
+import { priorLearningsBlock } from './generators'
 import { trackGen, type TrackOpts } from './utils'
 
 const STRATEGIC = () => modelFor('strategic')
@@ -37,7 +38,7 @@ VALUE PROP: ${ctx.valueProp}
 AUDIENCE: ${ctx.audience}
 FEATURES: ${ctx.features.join(' · ')}
 DIFFERENTIATORS: ${ctx.differentiators.join(' · ')}
-PRICING: ${ctx.pricing}
+PRICING: ${ctx.pricing}${priorLearningsBlock(ctx)}
 
 Produce the strategic brief for a 30-day launch.` }],
   })
@@ -76,7 +77,7 @@ export async function seoSpecialist(ctx: LaunchContext, brief: StrategicBrief, t
 - Themes: ${brief.top_3_themes.join(' | ')}
 
 PRODUCT CONTEXT: ${ctx.productName} — ${ctx.valueProp}
-AUDIENCE: ${ctx.audience}
+AUDIENCE: ${ctx.audience}${priorLearningsBlock(ctx)}
 
 Produce the SEO plan. Keywords should map to the brief's themes and audience search behavior.` }],
   })
@@ -114,7 +115,7 @@ export async function directorReview(
     messages: [{ role: 'user', content: `PRODUCT: ${ctx.productName}
 STRATEGIC BRIEF: ${brief.core_narrative}
 KEY METRIC: ${brief.key_metric}
-SEO FOCUS: ${seo.cluster_pillar}
+SEO FOCUS: ${seo.cluster_pillar}${priorLearningsBlock(ctx)}
 
 CHANNEL OUTPUTS:
 ${Object.entries(channelSummaries).map(([k, v]) => `\n— ${k.toUpperCase()} —\n${v}`).join('\n')}
@@ -154,7 +155,7 @@ export async function analyticsAgent(ctx: LaunchContext, brief: StrategicBrief, 
     system: `You are a growth analyst. Propose 3 high-leverage experiments, a clean UTM taxonomy, and a weekly report template.`,
     messages: [{ role: 'user', content: `PRODUCT: ${ctx.productName}
 KEY METRIC: ${brief.key_metric}
-THEMES: ${brief.top_3_themes.join(' | ')}
+THEMES: ${brief.top_3_themes.join(' | ')}${priorLearningsBlock(ctx)}
 
 Produce the analytics plan.` }],
   })

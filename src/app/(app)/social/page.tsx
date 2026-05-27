@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { useProject } from '@/hooks/use-project'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
@@ -40,7 +42,11 @@ type Tab = 'calendar' | 'posts'
 
 export default function SocialPage() {
   const { activeProject } = useProject()
+  const searchParams = useSearchParams()
+  const queryCampaignId = searchParams.get('campaignId')
   const supabase = createClient()
+  const [linkedCampaign, setLinkedCampaign] = useState<{ id: string; name: string } | null>(null)
+  const [campaignLinkState, setCampaignLinkState] = useState<'idle' | 'pending' | 'ok' | 'bad'>('idle')
   const [posts, setPosts] = useState<SocialPost[]>([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<Tab>('calendar')
@@ -61,6 +67,34 @@ export default function SocialPage() {
   const [connectedPlatforms, setConnectedPlatforms] = useState<Set<string>>(new Set())
 
   useEffect(() => {
+    if (!activeProject?.id || !queryCampaignId) {
+      setLinkedCampaign(null)
+      setCampaignLinkState('idle')
+      return
+    }
+    let cancelled = false
+    setCampaignLinkState('pending')
+    void supabase
+      .from('campaigns')
+      .select('id, name')
+      .eq('id', queryCampaignId)
+      .eq('project_id', activeProject.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return
+        if (data?.id) {
+          setLinkedCampaign({ id: data.id, name: String(data.name ?? 'Campaign') })
+          setCampaignLinkState('ok')
+        } else {
+          setLinkedCampaign(null)
+          setCampaignLinkState('bad')
+        }
+      })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- supabase client is session-scoped; omit to avoid identity churn
+  }, [activeProject?.id, queryCampaignId])
+
+  useEffect(() => {
     if (!activeProject) return
     fetchPosts()
     fetch(`/api/social/accounts?project_id=${activeProject.id}`)
@@ -73,7 +107,32 @@ export default function SocialPage() {
   async function fetchPosts() {
     if (!activeProject) return
     setLoading(true)
-    const { data } = await supabase.from('social_posts').select('*').eq('project_id', activeProject.id).order('scheduled_at', { ascending: true, nullsFirst: false })
+    const { data } = await supabase
+      .from('social_posts')
+      .select(`
+        id,
+        platform,
+        content,
+        media_urls,
+        status,
+        scheduled_at,
+        published_at,
+        ai_generated,
+        created_at,
+        external_url,
+        last_error,
+        attempts,
+        engagement,
+        engagement_synced_at,
+        engagement_sync_error,
+        is_winner,
+        winner_score,
+        video_url,
+        video_render_id,
+        video_status
+      `)
+      .eq('project_id', activeProject.id)
+      .order('scheduled_at', { ascending: true, nullsFirst: false })
     setPosts((data as SocialPost[]) ?? [])
     setLoading(false)
   }
@@ -85,9 +144,13 @@ export default function SocialPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { toast.error('Not authenticated'); setCreating(false); return }
     const { error } = await supabase.from('social_posts').insert({
-      user_id: user.id, project_id: activeProject.id, platform: cPlatform, content: cContent,
+      user_id: user.id,
+      project_id: activeProject.id,
+      platform: cPlatform,
+      content: cContent,
       status: cSchedule ? 'scheduled' : 'draft',
       scheduled_at: cSchedule ? new Date(cSchedule).toISOString() : null,
+      ...(linkedCampaign ? { campaign_id: linkedCampaign.id } : {}),
     })
     if (error) toast.error(error.message)
     else { toast.success(cSchedule ? 'Scheduled' : 'Draft saved'); setCOpen(false); setCContent(''); setCSchedule(''); fetchPosts() }
@@ -234,6 +297,21 @@ export default function SocialPage() {
           </>
         }
       />
+
+      {linkedCampaign && (
+        <div className="mb-4 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-200">
+          New posts attach to{' '}
+          <Link href={`/campaigns/${linkedCampaign.id}`} className="font-semibold text-emerald-300 underline hover:text-emerald-200">
+            {linkedCampaign.name}
+          </Link>
+          .
+        </div>
+      )}
+      {campaignLinkState === 'bad' && (
+        <div className="mb-4 rounded-md border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">
+          <code className="text-amber-100/90">campaignId</code> in the URL doesn&apos;t match this project — posts won&apos;t attach to a campaign until you use a valid link.
+        </div>
+      )}
 
       {connectedPlatforms.size === 0 && (
         <div className="mb-4 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">

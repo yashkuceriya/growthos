@@ -71,7 +71,25 @@ export default function AdStudioPage() {
     setLoading(true)
     const { data } = await supabase
       .from('ad_copies')
-      .select('*, ad_briefs!inner(project_id)')
+      .select(`
+        id,
+        brief_id,
+        iteration_number,
+        primary_text,
+        headline,
+        description,
+        cta_button,
+        status,
+        evaluation_scores,
+        weighted_average,
+        compliance,
+        media_urls,
+        created_at,
+        video_url,
+        video_render_id,
+        video_status,
+        ad_briefs!inner(project_id)
+      `)
       .eq('ad_briefs.project_id', activeProject.id)
       .order('created_at', { ascending: false })
     const list = (data as unknown as AdCopy[]) ?? []

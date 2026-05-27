@@ -17,6 +17,15 @@ async function handlePost(request: Request) {
   const { projectId, url } = await request.json().catch(() => ({}))
   if (!projectId || !url) return Response.json({ error: 'Missing projectId or url' }, { status: 400 })
 
+  // Defense-in-depth: explicitly assert ownership before running side effects.
+  const { data: project } = await supabase
+    .from('projects')
+    .select('id')
+    .eq('id', projectId)
+    .eq('user_id', user.id)
+    .maybeSingle()
+  if (!project) return Response.json({ error: 'Project not found' }, { status: 404 })
+
   try {
     const { brand } = await runIngest({ supabase, userId: user.id, projectId, url })
     return Response.json({ brand })

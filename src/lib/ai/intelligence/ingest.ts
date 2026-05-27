@@ -12,6 +12,7 @@ import { classifyProduct } from '@/lib/ai/intelligence/classifier'
 import { mergeBrandVoice } from '@/lib/brand-voice'
 import { captureScreenshot } from '@/lib/screenshots/capture'
 import { extractDesignTokens } from '@/lib/ai/design/extractor'
+import { fetchTextWithGuards } from '@/lib/security/outbound-url'
 
 export const BrandSchema = z.object({
   tagline: z.string().describe('Primary tagline or H1 headline from the page'),
@@ -58,22 +59,22 @@ export async function runIngest(args: IngestArgs): Promise<IngestResult> {
   // are at least less hostile. Sites behind Cloudflare/Akamai bot walls will
   // still 403 or return CAPTCHA HTML; we detect the latter and surface a
   // useful error rather than feeding gibberish to the LLM.
-  let html = ''
-  const fetchRes = await fetch(url, {
+  const { body: html, status: fetchStatus, finalUrl } = await fetchTextWithGuards(url, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 GrowthOS/1.0',
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'Accept-Language': 'en-US,en;q=0.9',
     },
-    redirect: 'follow',
+    timeoutMs: 20_000,
+    maxRedirects: 4,
+    maxBytes: 2_000_000,
   })
-  if (!fetchRes.ok) {
-    if (fetchRes.status === 403 || fetchRes.status === 429) {
-      throw new Error(`Failed to fetch site: ${fetchRes.status} — site blocks automated crawlers. Try a different URL or set the brand voice manually.`)
+  if (fetchStatus < 200 || fetchStatus >= 300) {
+    if (fetchStatus === 403 || fetchStatus === 429) {
+      throw new Error(`Failed to fetch site: ${fetchStatus} — site blocks automated crawlers. Try a different URL or set the brand voice manually.`)
     }
-    throw new Error(`Failed to fetch site: HTTP ${fetchRes.status}`)
+    throw new Error(`Failed to fetch site: HTTP ${fetchStatus}`)
   }
-  html = await fetchRes.text()
   // Cloudflare/CAPTCHA walls return 200 with a "Just a moment..." interstitial.
   // If the page is essentially empty of marketing content, bail with a clear msg.
   if (html.length < 500 || /just a moment|cf-browser-verification|attention required/i.test(html.slice(0, 4000))) {
@@ -81,7 +82,7 @@ export async function runIngest(args: IngestArgs): Promise<IngestResult> {
   }
 
   // Crude image + text extraction
-  const imgMatches = [...html.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)].map((m) => absoluteUrl(m[1]!, url))
+  const imgMatches = [...html.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)].map((m) => absoluteUrl(m[1]!, finalUrl))
   const trimmed = html
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<style[\s\S]*?<\/style>/gi, '')
@@ -94,7 +95,7 @@ export async function runIngest(args: IngestArgs): Promise<IngestResult> {
     system: `You extract structured brand info from a product landing page HTML. Return concrete facts grounded in the page content. For image URLs, choose from the list the user will provide and return absolute URLs. If the page has no testimonials or pricing, return "Not found" or empty arrays as appropriate.`,
     messages: [{
       role: 'user',
-      content: `URL: ${url}
+      content: `URL: ${finalUrl}
 
 Absolute image URLs found on the page (choose from these for logo/hero/screenshots; pick the most relevant, prefer product screenshots over stock photos):
 ${imgMatches.slice(0, 40).join('\n')}
@@ -106,10 +107,10 @@ ${trimmed}`,
 
   const normalized = {
     ...object,
-    logo_url: object.logo_url ? absoluteUrl(object.logo_url, url) : null,
-    hero_image_url: object.hero_image_url ? absoluteUrl(object.hero_image_url, url) : null,
-    screenshots: object.screenshots.map((s) => absoluteUrl(s, url)),
-    source_url: url,
+    logo_url: object.logo_url ? absoluteUrl(object.logo_url, finalUrl) : null,
+    hero_image_url: object.hero_image_url ? absoluteUrl(object.hero_image_url, finalUrl) : null,
+    screenshots: object.screenshots.map((s) => absoluteUrl(s, finalUrl)),
+    source_url: finalUrl,
     ingested_at: new Date().toISOString(),
   }
 
@@ -128,7 +129,7 @@ ${trimmed}`,
     classification = await classifyProduct({
       name: existing?.name ?? '',
       description: existing?.description ?? null,
-      website: url,
+      website: finalUrl,
       brandVoice: normalized,
       html: trimmed,
     })
@@ -145,7 +146,7 @@ ${trimmed}`,
   // on whatever marketing image was already in the page HTML.
   let capturedScreenshotUrl: string | null = null
   try {
-    const shot = await captureScreenshot(supabase, userId, projectId, url)
+    const shot = await captureScreenshot(supabase, userId, projectId, finalUrl)
     if (shot) {
       patch.captured_screenshot = {
         url: shot.url,
@@ -191,7 +192,7 @@ ${trimmed}`,
   // misconfigured API caller can't silently mutate a project's canonical
   // domain via the override parameter on /api/v1/projects/:id/ingest.
   const projectUpdate: Record<string, unknown> = {}
-  if (!existing?.website) projectUpdate.website = url
+  if (!existing?.website) projectUpdate.website = finalUrl
   if (!existing?.description && typeof normalized.value_proposition === 'string' && normalized.value_proposition.length > 0) {
     projectUpdate.description = normalized.value_proposition.slice(0, 500)
   }

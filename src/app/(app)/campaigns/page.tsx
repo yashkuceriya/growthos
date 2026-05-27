@@ -52,7 +52,11 @@ export default function CampaignsPage() {
   async function fetchCampaigns() {
     if (!activeProject) return
     setLoading(true)
-    const { data } = await supabase.from('campaigns').select('*').eq('project_id', activeProject.id).order('created_at', { ascending: false })
+    const { data } = await supabase
+      .from('campaigns')
+      .select('id, name, description, status, channels, budget_planned, start_date, end_date, created_at')
+      .eq('project_id', activeProject.id)
+      .order('created_at', { ascending: false })
     setCampaigns(data ?? [])
     setLoading(false)
   }

@@ -17,6 +17,7 @@ import { wrapHandler } from '@/lib/api-error'
 import { authenticateApiKey } from '@/lib/api-auth'
 import { withIdempotency } from '@/lib/idempotency'
 import { enforceRateLimit, attachRateLimitHeaders } from '@/lib/rate-limit-api'
+import { normalizeLeadInput } from '@/lib/leads/validation'
 
 async function handlePost(request: Request) {
   const auth = await authenticateApiKey(request, 'leads:write')
@@ -33,17 +34,10 @@ async function handlePost(request: Request) {
     try { return bodyText ? JSON.parse(bodyText) : {} }
     catch { return {} }
   })()
-  const {
-    projectId, email, name, source, sourceId, metadata,
-    campaignId, utm_source, utm_medium, utm_campaign, utm_content, utm_term,
-  } = body
-
-  if (!projectId || !email) {
-    return Response.json({ error: 'projectId and email are required' }, { status: 400 })
-  }
-  if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
-    return Response.json({ error: 'Invalid email' }, { status: 400 })
-  }
+  const parsed = normalizeLeadInput(body)
+  if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 })
+  const { data } = parsed
+  const { projectId, email, name, source, sourceId, metadata, campaignId, utm_source, utm_medium, utm_campaign, utm_content, utm_term } = data
 
   const supabase = createServiceClient()
 
@@ -78,7 +72,7 @@ async function handlePost(request: Request) {
         await supabase.from('lead_events').insert({
           lead_id: existing.id,
           event_type: 'api_touch',
-          metadata: { source, api_key_id: auth.keyId, ...metadata },
+          metadata: { ...metadata, source: source ?? 'api', api_key_id: auth.keyId },
         })
         return Response.json({ lead_id: existing.id, status: 'existing' })
       }
@@ -98,7 +92,7 @@ async function handlePost(request: Request) {
           utm_campaign: utm_campaign ?? null,
           utm_content: utm_content ?? null,
           utm_term: utm_term ?? null,
-          metadata: { api_key_id: auth.keyId, ...(metadata || {}) },
+          metadata: { ...metadata, api_key_id: auth.keyId },
           score: 10,
         })
         .select('id')
@@ -109,7 +103,7 @@ async function handlePost(request: Request) {
       await supabase.from('lead_events').insert({
         lead_id: lead.id,
         event_type: 'captured',
-        metadata: { source, api_key_id: auth.keyId, ...metadata },
+        metadata: { ...metadata, source: source ?? 'api', api_key_id: auth.keyId },
       })
 
       return Response.json({ lead_id: lead.id, status: 'new' })

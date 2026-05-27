@@ -11,6 +11,8 @@ import { Sparkline } from '@/components/ui/sparkline'
 import { Plus, Zap, Upload, Sparkles, Megaphone, AlertTriangle, CheckCircle2, FileText, Send, Globe, Activity } from 'lucide-react'
 import { AllProjectsGrid } from '@/components/dashboard/all-projects-grid'
 import { SetupChecklist, buildSteps } from '@/components/dashboard/setup-checklist'
+import { MarketingBlueprintPanel } from '@/components/dashboard/marketing-blueprint'
+import { NextBestActionPanel } from '@/components/dashboard/next-best-action'
 import type { IntegrationHealth, DashboardActivity, SetupChecklistState } from '@/app/api/dashboard/health/route'
 
 interface KpiData {
@@ -131,6 +133,16 @@ export default function DashboardPage() {
             setup,
           )}
         />
+      )}
+
+      <div className="mb-6">
+        <NextBestActionPanel projectId={activeProject?.id ?? null} />
+      </div>
+
+      {activeProject && (
+        <div className="mb-6">
+          <MarketingBlueprintPanel project={activeProject} />
+        </div>
       )}
 
       {/* All projects at a glance */}

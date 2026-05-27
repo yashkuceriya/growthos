@@ -15,4 +15,19 @@ describe('budgetExceededResponse', () => {
     expect(body.cap_usd).toBe(100)
     expect(body.remaining_usd).toBe(-20.123456) // remaining passed through unchanged
   })
+
+  it('returns 503 when budget guard is unavailable', async () => {
+    const r = budgetExceededResponse({
+      ok: false,
+      spent: 0,
+      cap: null,
+      remaining: null,
+      unavailable: true,
+      error: 'rpc timeout',
+    })
+    expect(r.status).toBe(503)
+    const body = await r.json()
+    expect(body.error).toBe('Budget guard temporarily unavailable')
+    expect(body.reason).toBe('rpc timeout')
+  })
 })

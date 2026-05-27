@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { useProject } from '@/hooks/use-project'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
@@ -10,7 +11,7 @@ import { StatusPill } from '@/components/ui/status-pill'
 import {
   Rocket, Loader2, CheckCircle2, AlertCircle, ExternalLink, Copy,
   Mail, Music, Search, Users, Globe, FileText, MessageCircle, Briefcase,
-  X, Clock, Sparkles,
+  X, Clock, Sparkles, Target, Compass, RefreshCw,
 } from 'lucide-react'
 // Search icon used in SEO panel; keep explicit import above.
 import { cn } from '@/lib/utils'
@@ -54,8 +55,39 @@ interface Asset {
   metadata?: Record<string, unknown>
 }
 
+interface LaunchChannelRec {
+  channel: ChannelKey
+  tier: 'primary' | 'secondary' | 'off'
+  reason: string
+  defaultOn: boolean
+}
+
+interface LaunchPlan {
+  vertical: string
+  icp: string | null
+  primaryGoal: string | null
+  primaryKpi: string
+  secondaryKpis: string[]
+  channels: LaunchChannelRec[]
+  defaultChannels: ChannelKey[]
+  contentMix: Array<{ label: string; pct: number }>
+  launchTactics: string[]
+  croFocus: string[]
+  lifecycleEmails: string[]
+  readiness: Array<{ label: string; ready: boolean; hint: string }>
+  suggestedAngles: string[]
+  defaultGoal: string
+  defaultAngle: string | null
+  source: 'classification' | 'fallback'
+}
+
 export default function LaunchPage() {
   const { activeProject } = useProject()
+  const searchParams = useSearchParams()
+  // Optional re-launch flow: a Campaign Command Center "Re-launch" button
+  // routes here with ?campaignId=... so new assets reuse the existing
+  // campaign id instead of orphaning under a new row.
+  const reuseCampaignId = searchParams.get('campaignId')
   const supabase = createClient()
 
   const [launching, setLaunching] = useState(false)
@@ -67,6 +99,16 @@ export default function LaunchPage() {
   const [assets, setAssets] = useState<Record<ChannelKey, Asset[]>>(() =>
     Object.fromEntries(CHANNELS.map((c) => [c.key, []])) as unknown as Record<ChannelKey, Asset[]>
   )
+
+  // Plan preview state — fetched from /api/launch/plan whenever the active
+  // project changes. Operator-editable: channel toggles, campaign goal, and
+  // narrative angle override the plan defaults before /api/launch is called.
+  const [plan, setPlan] = useState<LaunchPlan | null>(null)
+  const [planLoading, setPlanLoading] = useState(false)
+  const [planError, setPlanError] = useState<string | null>(null)
+  const [selectedChannels, setSelectedChannels] = useState<Set<ChannelKey>>(new Set())
+  const [goal, setGoal] = useState<string>('')
+  const [angle, setAngle] = useState<string>('')
 
   // Agent outputs
   type AgentKey = 'cmo' | 'seo' | 'director' | 'analytics'
@@ -114,11 +156,11 @@ export default function LaunchPage() {
   async function refreshAssets(projectId: string) {
     // Re-fetch assets from all relevant tables
     const [ads, social, emailSeq, content, landing] = await Promise.all([
-      supabase.from('ad_copies').select('*, ad_briefs!inner(platform, project_id)').eq('ad_briefs.project_id', projectId).eq('metadata->>launch_run', 'true').order('created_at', { ascending: false }).limit(20),
-      supabase.from('social_posts').select('*').eq('project_id', projectId).eq('metadata->>launch_run', 'true').order('created_at', { ascending: false }).limit(30),
-      supabase.from('email_templates').select('*').eq('project_id', projectId).eq('category', 'welcome').order('created_at', { ascending: false }).limit(10),
-      supabase.from('content_pieces').select('*').eq('project_id', projectId).eq('metadata->>launch_run', 'true').order('created_at', { ascending: false }).limit(5),
-      supabase.from('landing_pages').select('*').eq('project_id', projectId).order('created_at', { ascending: false }).limit(3),
+      supabase.from('ad_copies').select('id, headline, primary_text, cta_button, metadata, ad_briefs!inner(platform, project_id)').eq('ad_briefs.project_id', projectId).eq('metadata->>launch_run', 'true').order('created_at', { ascending: false }).limit(20),
+      supabase.from('social_posts').select('id, platform, content, metadata').eq('project_id', projectId).eq('metadata->>launch_run', 'true').order('created_at', { ascending: false }).limit(30),
+      supabase.from('email_templates').select('id, subject, body_html').eq('project_id', projectId).eq('category', 'welcome').order('created_at', { ascending: false }).limit(10),
+      supabase.from('content_pieces').select('id, title, body_markdown').eq('project_id', projectId).eq('metadata->>launch_run', 'true').order('created_at', { ascending: false }).limit(5),
+      supabase.from('landing_pages').select('id, name, slug, template').eq('project_id', projectId).order('created_at', { ascending: false }).limit(3),
     ])
 
     const next: Record<ChannelKey, Asset[]> = Object.fromEntries(CHANNELS.map((c) => [c.key, []])) as unknown as Record<ChannelKey, Asset[]>
@@ -151,10 +193,49 @@ export default function LaunchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProject?.id])
 
+  async function loadPlan(projectId: string) {
+    setPlanLoading(true)
+    setPlanError(null)
+    try {
+      const res = await fetch(`/api/launch/plan?projectId=${encodeURIComponent(projectId)}`)
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string }
+        throw new Error(body.error ?? `Plan request failed: ${res.status}`)
+      }
+      const body = (await res.json()) as { plan: LaunchPlan }
+      setPlan(body.plan)
+      setSelectedChannels(new Set(body.plan.defaultChannels))
+      setGoal(body.plan.defaultGoal)
+      setAngle(body.plan.defaultAngle ?? '')
+    } catch (err) {
+      setPlanError(err instanceof Error ? err.message : 'Failed to load plan')
+    } finally {
+      setPlanLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (activeProject) loadPlan(activeProject.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProject?.id])
+
+  function toggleChannel(channel: ChannelKey) {
+    setSelectedChannels((prev) => {
+      const next = new Set(prev)
+      if (next.has(channel)) next.delete(channel)
+      else next.add(channel)
+      return next
+    })
+  }
+
   async function handleLaunch() {
     if (!activeProject) return
     if (!hasBrandVoice) {
       toast.error('Sync the project website first (Projects → Sync Site)')
+      return
+    }
+    if (selectedChannels.size === 0) {
+      toast.error('Select at least one channel to launch')
       return
     }
 
@@ -168,7 +249,13 @@ export default function LaunchPage() {
     try {
       const res = await fetch('/api/launch', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: activeProject.id }),
+        body: JSON.stringify({
+          projectId: activeProject.id,
+          channels: Array.from(selectedChannels),
+          goal: goal.trim() || undefined,
+          angle: angle.trim() || undefined,
+          campaignId: reuseCampaignId ?? undefined,
+        }),
       })
       if (!res.ok) throw new Error(await res.text())
       const reader = res.body?.getReader()
@@ -264,7 +351,34 @@ export default function LaunchPage() {
             No brand info synced yet. <a href="/projects" className="underline">Go to Projects → Sync Site</a> first so generated content references your real product.
           </div>
         )}
+        {reuseCampaignId && (
+          <div className="relative mt-4 rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs text-emerald-200">
+            Re-launching into an existing campaign. New assets will attach to campaign{' '}
+            <a href={`/campaigns/${reuseCampaignId}`} className="font-mono-data underline hover:text-emerald-100">
+              {reuseCampaignId.slice(0, 8)}…
+            </a>{' '}
+            so this run extends the same command center view.
+          </div>
+        )}
       </div>
+
+      {/* Plan Preview — shown BEFORE the operator commits AI budget. Lets
+          them see what channels GrowthOS recommends, why, and tweak the
+          goal/angle if they want to steer the launch away from defaults. */}
+      {hasBrandVoice && (
+        <PlanPreview
+          plan={plan}
+          loading={planLoading}
+          error={planError}
+          selected={selectedChannels}
+          goal={goal}
+          angle={angle}
+          onToggleChannel={toggleChannel}
+          onChangeGoal={setGoal}
+          onChangeAngle={setAngle}
+          onReload={() => activeProject && loadPlan(activeProject.id)}
+        />
+      )}
 
       {/* Agent Team Bar */}
       {(agents.cmo.status !== 'pending' || launching) && (
@@ -605,6 +719,188 @@ export default function LaunchPage() {
         />
       )}
     </PageShell>
+  )
+}
+
+function PlanPreview({
+  plan, loading, error, selected, goal, angle,
+  onToggleChannel, onChangeGoal, onChangeAngle, onReload,
+}: {
+  plan: LaunchPlan | null
+  loading: boolean
+  error: string | null
+  selected: Set<ChannelKey>
+  goal: string
+  angle: string
+  onToggleChannel: (c: ChannelKey) => void
+  onChangeGoal: (s: string) => void
+  onChangeAngle: (s: string) => void
+  onReload: () => void
+}) {
+  if (loading && !plan) {
+    return (
+      <div className="mb-4 rounded-md border border-slate-800 bg-slate-900/40 p-4 text-xs text-slate-400">
+        <Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin text-emerald-400" />
+        Building recommended launch plan…
+      </div>
+    )
+  }
+  if (error) {
+    return (
+      <div className="mb-4 rounded-md border border-rose-500/30 bg-rose-500/5 p-4 text-xs text-rose-300">
+        Plan unavailable: {error}{' '}
+        <button onClick={onReload} className="underline hover:text-rose-200">Retry</button>
+      </div>
+    )
+  }
+  if (!plan) return null
+
+  const goalOptions = ['awareness', 'engagement', 'conversion']
+
+  return (
+    <div className="mb-6 rounded-md border border-slate-800 bg-slate-900/40 p-5">
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <Compass className="h-3.5 w-3.5 text-emerald-400" />
+            <h2 className="text-sm font-semibold text-slate-100">Recommended Launch Plan</h2>
+            <StatusPill tone={plan.source === 'classification' ? 'success' : 'warn'}>
+              {plan.source === 'classification' ? plan.vertical.replace(/_/g, ' ') : 'unclassified · fallback playbook'}
+            </StatusPill>
+          </div>
+          {plan.icp && <p className="mt-1 text-xs text-slate-400">ICP: {plan.icp}</p>}
+        </div>
+        <button
+          onClick={onReload}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-800"
+          title="Reload plan"
+        >
+          <RefreshCw className="h-3 w-3" /> Reload
+        </button>
+      </div>
+
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="rounded-md border border-slate-800 bg-slate-900/60 p-3">
+          <span className="font-mono-data text-[10px] uppercase tracking-wider text-slate-500">Primary KPI</span>
+          <p className="mt-1 text-xs font-semibold text-emerald-300">{plan.primaryKpi}</p>
+          {plan.secondaryKpis.length > 0 && (
+            <p className="mt-1 text-[10px] text-slate-500">Also watching: {plan.secondaryKpis.slice(0, 3).join(' · ')}</p>
+          )}
+        </div>
+        <div className="rounded-md border border-slate-800 bg-slate-900/60 p-3">
+          <span className="font-mono-data text-[10px] uppercase tracking-wider text-slate-500">Content Mix</span>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {plan.contentMix.map((m) => (
+              <span key={m.label} className="rounded bg-slate-800 px-2 py-0.5 text-[10px] text-slate-200">{m.label} <span className="text-emerald-300">{m.pct}%</span></span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="mb-4">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="font-mono-data text-[10px] uppercase tracking-wider text-slate-500">Channels</span>
+          <span className="text-[10px] text-slate-500">{selected.size} of {plan.channels.length} on</span>
+        </div>
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+          {plan.channels.map((c) => {
+            const isOn = selected.has(c.channel)
+            const tierTone = c.tier === 'primary' ? 'success' : c.tier === 'secondary' ? 'warn' : 'neutral'
+            return (
+              <button
+                key={c.channel}
+                onClick={() => onToggleChannel(c.channel)}
+                className={cn(
+                  'flex items-start gap-3 rounded-md border p-3 text-left transition-all',
+                  isOn
+                    ? 'border-emerald-500/40 bg-emerald-500/5 hover:border-emerald-500/60'
+                    : 'border-slate-800 bg-slate-900/40 hover:border-slate-700',
+                )}
+              >
+                <span className={cn(
+                  'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border-2',
+                  isOn ? 'border-emerald-400 bg-emerald-500/30' : 'border-slate-600',
+                )}>
+                  {isOn && <CheckCircle2 className="h-3 w-3 text-emerald-300" />}
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-slate-100 capitalize">{c.channel}</span>
+                    <StatusPill tone={tierTone}>{c.tier}</StatusPill>
+                  </span>
+                  <span className="mt-1 block text-[11px] text-slate-400">{c.reason}</span>
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <label className="block">
+          <span className="font-mono-data flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-500">
+            <Target className="h-3 w-3" /> Campaign goal
+          </span>
+          <select
+            value={goal}
+            onChange={(e) => onChangeGoal(e.target.value)}
+            className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-100 focus:border-emerald-500/60 focus:outline-none"
+          >
+            {goalOptions.map((g) => (
+              <option key={g} value={g}>{g}</option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="font-mono-data flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-500">
+            <Sparkles className="h-3 w-3" /> Narrative angle
+          </span>
+          <input
+            type="text"
+            value={angle}
+            onChange={(e) => onChangeAngle(e.target.value)}
+            placeholder={plan.defaultAngle ?? 'Optional — leave blank to let CMO pick'}
+            className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-100 placeholder:text-slate-600 focus:border-emerald-500/60 focus:outline-none"
+          />
+        </label>
+      </div>
+
+      {plan.suggestedAngles.length > 0 && (
+        <div className="mb-4">
+          <span className="font-mono-data text-[10px] uppercase tracking-wider text-slate-500">Suggested angles</span>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {plan.suggestedAngles.map((a) => (
+              <button
+                key={a}
+                onClick={() => onChangeAngle(a)}
+                className="rounded border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-[10px] text-slate-300 hover:border-emerald-500/60 hover:text-emerald-200"
+              >
+                {a.length > 64 ? `${a.slice(0, 64)}…` : a}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {plan.readiness.length > 0 && (
+        <div>
+          <span className="font-mono-data text-[10px] uppercase tracking-wider text-slate-500">Readiness</span>
+          <ul className="mt-1.5 space-y-1 text-[11px]">
+            {plan.readiness.map((r) => (
+              <li key={r.label} className="flex items-start gap-2">
+                {r.ready
+                  ? <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-emerald-400" />
+                  : <AlertCircle className="mt-0.5 h-3 w-3 shrink-0 text-amber-400" />
+                }
+                <span className={r.ready ? 'text-slate-300' : 'text-amber-200'}>
+                  <span className="font-semibold">{r.label}</span>{!r.ready ? <> — <span className="text-slate-400">{r.hint}</span></> : null}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   )
 }
 

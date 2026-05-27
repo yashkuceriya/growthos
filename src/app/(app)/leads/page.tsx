@@ -48,7 +48,11 @@ export default function LeadsPage() {
   async function fetchLeads() {
     if (!activeProject) return
     setLoading(true)
-    const { data } = await supabase.from('leads').select('*').eq('project_id', activeProject.id).order('score', { ascending: false })
+    const { data } = await supabase
+      .from('leads')
+      .select('id, email, name, source, score, status, metadata, created_at')
+      .eq('project_id', activeProject.id)
+      .order('score', { ascending: false })
     setLeads((data as Lead[]) ?? [])
     setLoading(false)
   }

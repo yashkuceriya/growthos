@@ -37,7 +37,11 @@ export default function LandingPagesPage() {
   async function fetchPages() {
     if (!activeProject) return
     setLoading(true)
-    const { data } = await supabase.from('landing_pages').select('*').eq('project_id', activeProject.id).order('created_at', { ascending: false })
+    const { data } = await supabase
+      .from('landing_pages')
+      .select('id, name, slug, template, published, visits, conversions')
+      .eq('project_id', activeProject.id)
+      .order('created_at', { ascending: false })
     setPages((data as LandingPage[]) ?? [])
     setLoading(false)
   }

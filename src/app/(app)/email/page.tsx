@@ -59,9 +59,19 @@ export default function EmailPage() {
     if (!activeProject) return
     setLoading(true)
     const [t, l, s] = await Promise.all([
-      supabase.from('email_templates').select('*').eq('project_id', activeProject.id).order('created_at', { ascending: false }),
-      supabase.from('email_lists').select('*').eq('project_id', activeProject.id),
-      supabase.from('email_sequences').select('*').eq('project_id', activeProject.id),
+      supabase
+        .from('email_templates')
+        .select('id, name, subject, body_html, category, created_at, is_winner, winner_score')
+        .eq('project_id', activeProject.id)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('email_lists')
+        .select('id, name, description, subscriber_count')
+        .eq('project_id', activeProject.id),
+      supabase
+        .from('email_sequences')
+        .select('id, name, trigger_type, status')
+        .eq('project_id', activeProject.id),
     ])
     setTemplates((t.data as EmailTemplate[]) ?? [])
     setLists((l.data as EmailList[]) ?? [])

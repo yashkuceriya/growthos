@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { generateBlogPost } from '@/lib/ai/content/generator'
 import { trackAICost, estimateCost } from '@/lib/cost-tracker'
+import { getMarketingMemory, marketingMemoryPrompt } from '@/lib/marketing/memory'
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -14,7 +15,19 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Missing required fields' }, { status: 400 })
   }
 
-  const result = await generateBlogPost({ topic, targetKeyword, audience, tone, outline, wordCount })
+  // Unified marketing memory — pulls brand, blueprint, founder voice, and
+  // any promoted-winner blog patterns into one block.
+  const memory = projectId
+    ? await getMarketingMemory({
+        supabase,
+        userId: user.id,
+        projectId,
+        assetKind: 'blog_post',
+      })
+    : null
+  const styleContext = memory ? marketingMemoryPrompt(memory, 'blog') : undefined
+
+  const result = await generateBlogPost({ topic, targetKeyword, audience, tone, outline, wordCount, styleContext })
 
   const model = 'google/gemini-2.0-flash-001'
   await trackAICost({

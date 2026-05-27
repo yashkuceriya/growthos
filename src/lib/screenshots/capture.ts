@@ -18,6 +18,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ensureBucket } from '@/lib/storage/ensure-bucket'
+import { validateOutboundHttpUrl } from '@/lib/security/outbound-url'
 
 // Default bucket name when SCREENSHOT_STORAGE_BUCKET is unset. Auto-
 // created via ensureBucket so the system "just works" — no manual
@@ -63,6 +64,12 @@ export async function captureScreenshot(
   options: CaptureOptions = {},
 ): Promise<CaptureResult | null> {
   const opts = { ...DEFAULT_OPTIONS, ...options, viewport: { ...DEFAULT_OPTIONS.viewport, ...options.viewport } }
+  const validated = validateOutboundHttpUrl(targetUrl)
+  if (!validated.ok || !validated.normalized) {
+    console.warn(`[screenshots] skipping capture for blocked URL: ${validated.reason ?? 'invalid URL'}`)
+    return null
+  }
+  const safeTargetUrl = validated.normalized
 
   const accessKey = process.env.SCREENSHOTONE_ACCESS_KEY
   if (!accessKey) {
@@ -74,7 +81,7 @@ export async function captureScreenshot(
   // optionally mirror to Storage, and return the public URL.
   const params = new URLSearchParams({
     access_key: accessKey,
-    url: targetUrl,
+    url: safeTargetUrl,
     viewport_width: String(opts.viewport.width),
     viewport_height: String(opts.viewport.height),
     full_page: String(opts.fullPage),

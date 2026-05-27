@@ -1,38 +1,45 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
-import { rateLimit, clientIp } from '@/lib/rate-limit'
+import { rateLimitPublic, clientIp } from '@/lib/rate-limit'
 import { wrapHandler } from '@/lib/api-error'
 import { emitEvent } from '@/lib/webhooks/dispatch'
 import type { LeadCreatedPayload } from '@/lib/webhooks/payloads'
+import { normalizeLeadInput } from '@/lib/leads/validation'
+import { verifyLeadCaptureToken } from '@/lib/leads/capture-token'
 
 /** Public endpoint — no auth required. Used by landing pages and external forms. */
 async function handlePost(request: Request) {
   // IP throttle: 10 submissions / minute per IP
   const ip = clientIp(request)
-  const { ok } = rateLimit(`lead-capture:${ip}`, 10, 60_000)
+  const { ok } = await rateLimitPublic(`lead-capture:${ip}`, 10, 60_000)
   if (!ok) {
     return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
   }
 
-  const body = await request.json()
-  const {
-    projectId, email, name, source, sourceId, metadata, website,
-    campaignId, utm_source, utm_medium, utm_campaign, utm_content, utm_term,
-  } = body
+  const body = await request.json().catch(() => null)
+  if (!body || typeof body !== 'object') {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+  }
+
+  const website = typeof (body as Record<string, unknown>).website === 'string'
+    ? (body as Record<string, unknown>).website
+    : null
 
   // Honeypot — real users never fill hidden `website` field
   if (typeof website === 'string' && website.length > 0) {
     return NextResponse.json({ status: 'ok' }) // silent reject
   }
 
-  if (!projectId || !email) {
-    return NextResponse.json({ error: 'projectId and email are required' }, { status: 400 })
-  }
-
-  // Shape check on email to catch obvious junk before hitting DB
-  if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
-    return NextResponse.json({ error: 'Invalid email' }, { status: 400 })
-  }
+  const parsed = normalizeLeadInput(body)
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
+  const { data } = parsed
+  const { projectId, email, name, source, sourceId, metadata, campaignId, utm_source, utm_medium, utm_campaign, utm_content, utm_term } = data
+  const tokenCheck = verifyLeadCaptureToken({
+    token: (body as Record<string, unknown>).captureToken,
+    projectId,
+    sourceId,
+  })
+  if (!tokenCheck.ok) return NextResponse.json({ error: tokenCheck.reason }, { status: 403 })
 
   const supabase = createServiceClient()
 
@@ -57,7 +64,7 @@ async function handlePost(request: Request) {
     await supabase.from('lead_events').insert({
       lead_id: existing.id,
       event_type: 'form_submit',
-      metadata: { source, ip, ...metadata },
+      metadata: { ...metadata, source: source ?? 'direct', ip },
     })
     return NextResponse.json({ lead_id: existing.id, status: 'existing' })
   }
@@ -77,7 +84,7 @@ async function handlePost(request: Request) {
       utm_campaign: utm_campaign ?? null,
       utm_content: utm_content ?? null,
       utm_term: utm_term ?? null,
-      metadata: { ip, ...(metadata || {}) },
+      metadata: { ...metadata, ip },
       score: 10,
     })
     .select('id')
@@ -90,7 +97,7 @@ async function handlePost(request: Request) {
   await supabase.from('lead_events').insert({
     lead_id: lead.id,
     event_type: 'captured',
-    metadata: { source, ip, ...metadata },
+    metadata: { ...metadata, source: source ?? 'direct', ip },
   })
 
   const leadPayload: LeadCreatedPayload = {

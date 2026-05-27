@@ -24,6 +24,18 @@ export interface LaunchContext {
   primaryColor: string
   heroImageUrl: string | null
   website: string | null
+  // Filled when re-launching an existing campaign that has a persisted
+  // learning_summary in campaign metadata.
+  priorCampaignLearnings?: string | null
+}
+
+export function priorLearningsBlock(ctx: LaunchContext): string {
+  const t = ctx.priorCampaignLearnings?.trim()
+  if (!t) return ''
+  return `
+
+PRIOR CAMPAIGN LEARNINGS (same campaign — amplify what worked, avoid repeating underperformers):
+${t}`
 }
 
 function contextBlock(ctx: LaunchContext) {
@@ -35,7 +47,7 @@ FEATURES: ${ctx.features.join(' · ')}
 DIFFERENTIATORS: ${ctx.differentiators.join(' · ')}
 PRICING: ${ctx.pricing}
 TONE: ${ctx.tone}
-WEBSITE: ${ctx.website ?? ''}`
+WEBSITE: ${ctx.website ?? ''}${priorLearningsBlock(ctx)}`
 }
 
 export async function genMetaAd(ctx: LaunchContext, track?: TrackOpts) {

@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { useProject } from '@/hooks/use-project'
-import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { PageShell } from '@/components/ui/page-shell'
 import { PageHeader } from '@/components/ui/page-header'
@@ -27,6 +29,10 @@ type PipelineStep = { key: string; label: string; status: 'pending' | 'active' |
 export default function GenerateAdsPage() {
   const { activeProject } = useProject()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const queryCampaignId = searchParams.get('campaignId')
+  const [linkedCampaign, setLinkedCampaign] = useState<{ id: string; name: string } | null>(null)
+  const [campaignLinkState, setCampaignLinkState] = useState<'idle' | 'pending' | 'ok' | 'bad'>('idle')
 
   const [platform, setPlatform] = useState<'meta' | 'tiktok' | 'google'>('meta')
   const [audience, setAudience] = useState('')
@@ -41,6 +47,34 @@ export default function GenerateAdsPage() {
   const [videoStatus, setVideoStatus] = useState<'idle' | 'queued' | 'rendering' | 'completed' | 'failed'>('idle')
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [videoError, setVideoError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!activeProject?.id || !queryCampaignId) {
+      setLinkedCampaign(null)
+      setCampaignLinkState('idle')
+      return
+    }
+    const supabase = createClient()
+    let cancelled = false
+    setCampaignLinkState('pending')
+    void supabase
+      .from('campaigns')
+      .select('id, name')
+      .eq('id', queryCampaignId)
+      .eq('project_id', activeProject.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return
+        if (data?.id) {
+          setLinkedCampaign({ id: data.id, name: String(data.name ?? 'Campaign') })
+          setCampaignLinkState('ok')
+        } else {
+          setLinkedCampaign(null)
+          setCampaignLinkState('bad')
+        }
+      })
+    return () => { cancelled = true }
+  }, [activeProject?.id, queryCampaignId])
 
   // Auto-fill offer + audience from synced brand_voice when project changes
   useEffect(() => {
@@ -123,6 +157,7 @@ export default function GenerateAdsPage() {
           campaignGoal: goal,
           tone,
           creativeMode,
+          ...(queryCampaignId ? { campaignId: queryCampaignId } : {}),
         }),
       })
 
@@ -230,6 +265,21 @@ export default function GenerateAdsPage() {
         title="Ad Generate"
         subtitle={<StatusPill tone="accent"><Zap className="h-2.5 w-2.5" />AI ENGINE V4.2</StatusPill>}
       />
+
+      {linkedCampaign && (
+        <div className="mb-4 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-200">
+          New ads attach to{' '}
+          <Link href={`/campaigns/${linkedCampaign.id}`} className="font-semibold text-emerald-300 underline hover:text-emerald-200">
+            {linkedCampaign.name}
+          </Link>
+          .
+        </div>
+      )}
+      {campaignLinkState === 'bad' && (
+        <div className="mb-4 rounded-md border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">
+          Campaign link in URL doesn&apos;t match this project — ads won&apos;t attach until you open this page from the campaign Command Center or fix the query param.
+        </div>
+      )}
 
       <div className="grid grid-cols-12 gap-4">
         {/* Config */}

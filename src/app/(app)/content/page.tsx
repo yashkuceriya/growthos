@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { useProject } from '@/hooks/use-project'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
@@ -19,7 +21,11 @@ interface ContentPiece {
 
 export default function ContentPage() {
   const { activeProject } = useProject()
+  const searchParams = useSearchParams()
+  const queryCampaignId = searchParams.get('campaignId')
   const supabase = createClient()
+  const [linkedCampaign, setLinkedCampaign] = useState<{ id: string; name: string } | null>(null)
+  const [campaignLinkState, setCampaignLinkState] = useState<'idle' | 'pending' | 'ok' | 'bad'>('idle')
   const [pieces, setPieces] = useState<ContentPiece[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -43,12 +49,47 @@ export default function ContentPage() {
   const [editTitle, setEditTitle] = useState('')
   const [editKeyword, setEditKeyword] = useState('')
 
-  useEffect(() => { if (activeProject) fetchContent() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [activeProject?.id])
+  useEffect(() => {
+    if (!activeProject?.id || !queryCampaignId) {
+      setLinkedCampaign(null)
+      setCampaignLinkState('idle')
+      return
+    }
+    let cancelled = false
+    setCampaignLinkState('pending')
+    void supabase
+      .from('campaigns')
+      .select('id, name')
+      .eq('id', queryCampaignId)
+      .eq('project_id', activeProject.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return
+        if (data?.id) {
+          setLinkedCampaign({ id: data.id, name: String(data.name ?? 'Campaign') })
+          setCampaignLinkState('ok')
+        } else {
+          setLinkedCampaign(null)
+          setCampaignLinkState('bad')
+        }
+      })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProject?.id, queryCampaignId])
+
+  useEffect(() => {
+    if (activeProject) fetchContent()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload list when project changes
+  }, [activeProject?.id])
 
   async function fetchContent() {
     if (!activeProject) return
     setLoading(true)
-    const { data } = await supabase.from('content_pieces').select('*').eq('project_id', activeProject.id).order('created_at', { ascending: false })
+    const { data } = await supabase
+      .from('content_pieces')
+      .select('id, title, body_markdown, content_type, status, seo_score, target_keywords, word_count, created_at')
+      .eq('project_id', activeProject.id)
+      .order('created_at', { ascending: false })
     setPieces((data as ContentPiece[]) ?? [])
     setLoading(false)
   }
@@ -66,6 +107,7 @@ export default function ContentPage() {
       body_markdown: cBody || null,
       target_keywords: cKeywords ? cKeywords.split(',').map((k) => k.trim()) : [],
       word_count: wordCount, status: cBody ? 'drafting' : 'idea',
+      ...(linkedCampaign ? { campaign_id: linkedCampaign.id } : {}),
     })
     if (error) toast.error(error.message)
     else { toast.success('Content created'); setCOpen(false); setCTitle(''); setCType('blog_post'); setCKeywords(''); setCBody(''); fetchContent() }
@@ -229,6 +271,21 @@ export default function ContentPage() {
           </>
         }
       />
+
+      {linkedCampaign && (
+        <div className="mb-4 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-200">
+          New pieces attach to{' '}
+          <Link href={`/campaigns/${linkedCampaign.id}`} className="font-semibold text-emerald-300 underline hover:text-emerald-200">
+            {linkedCampaign.name}
+          </Link>
+          .
+        </div>
+      )}
+      {campaignLinkState === 'bad' && (
+        <div className="mb-4 rounded-md border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">
+          <code className="text-amber-100/90">campaignId</code> in the URL doesn&apos;t match this project — content won&apos;t attach to a campaign until you use a valid link.
+        </div>
+      )}
 
       {loading ? <SectionPanel>Loading…</SectionPanel> : pieces.length === 0 ? (
         <SectionPanel><div className="flex flex-col items-center py-12"><FileText className="h-10 w-10 text-slate-600 mb-3" /><p className="text-sm text-slate-400">No content yet.</p></div></SectionPanel>

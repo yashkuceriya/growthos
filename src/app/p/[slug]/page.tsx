@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
+import { createLeadCaptureToken } from '@/lib/leads/capture-token'
 
 interface PageTemplate {
   headline?: string
@@ -16,7 +17,7 @@ export default async function PublicLandingPage({ params }: { params: Promise<{ 
 
   const { data: page } = await supabase
     .from('landing_pages')
-    .select('*')
+    .select('id, project_id, template, visits')
     .eq('slug', slug)
     .eq('published', true)
     .maybeSingle()
@@ -31,6 +32,7 @@ export default async function PublicLandingPage({ params }: { params: Promise<{ 
 
   const template = (page.template || {}) as PageTemplate
   const projectId = page.project_id
+  const captureToken = createLeadCaptureToken({ projectId, sourceId: page.id })
 
   return (
     <html lang="en">
@@ -66,6 +68,7 @@ export default async function PublicLandingPage({ params }: { params: Promise<{ 
             <input type="hidden" name="projectId" value={projectId} />
             <input type="hidden" name="source" value="landing_page" />
             <input type="hidden" name="sourceId" value={page.id} />
+            {captureToken && <input type="hidden" name="captureToken" value={captureToken} />}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <input

@@ -15,18 +15,52 @@ import { withRetries, generateAdImagesForCopy, brandContextFromCtx, type TrackOp
 import { extractLaunchInsights, type LaunchInsights } from '@/lib/ai/launch/insight-extractor'
 import { mergeBrandVoice } from '@/lib/brand-voice'
 import { checkBudget, budgetExceededResponse } from '@/lib/budget-guard'
+import { isLaunchChannel, LAUNCH_CHANNELS } from '@/lib/launch/plan'
+import { learningSummaryToPrompt } from '@/lib/campaigns/learning'
 
 // Channel ids the UI renders — must match keys below
-const ALL_CHANNELS = ['meta', 'linkedin', 'tiktok', 'twitter', 'reddit', 'email', 'blog', 'landing'] as const
+const ALL_CHANNELS = LAUNCH_CHANNELS
 type Channel = typeof ALL_CHANNELS[number]
+
+interface LaunchRequestBody {
+  projectId?: string
+  // Optional overrides. Operator-selected channels take precedence over the
+  // playbook recommendation when present. Goal + angle thread through the
+  // launch context so generators speak to the chosen narrative.
+  channels?: unknown
+  goal?: unknown
+  angle?: unknown
+  campaignId?: unknown
+}
 
 export async function POST(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { projectId } = await request.json()
+  const body = (await request.json()) as LaunchRequestBody
+  const { projectId } = body
   if (!projectId) return Response.json({ error: 'projectId required' }, { status: 400 })
+
+  // Validate operator overrides up-front so a bad request fails before we
+  // grab the launch mutex or burn AI budget.
+  let overrideChannels: Channel[] | null = null
+  if (body.channels !== undefined) {
+    if (!Array.isArray(body.channels) || body.channels.length === 0) {
+      return Response.json({ error: 'channels must be a non-empty array' }, { status: 400 })
+    }
+    const invalid = body.channels.filter((c) => !isLaunchChannel(c))
+    if (invalid.length) {
+      return Response.json(
+        { error: `Unsupported channels: ${invalid.join(', ')}. Supported: ${ALL_CHANNELS.join(', ')}` },
+        { status: 400 },
+      )
+    }
+    overrideChannels = Array.from(new Set(body.channels as Channel[]))
+  }
+  const overrideGoal = typeof body.goal === 'string' && body.goal.trim().length > 0 ? body.goal.trim() : null
+  const overrideAngle = typeof body.angle === 'string' && body.angle.trim().length > 0 ? body.angle.trim() : null
+  const reuseCampaignId = typeof body.campaignId === 'string' && body.campaignId.trim().length > 0 ? body.campaignId.trim() : null
 
   const { data: project } = await supabase
     .from('projects')
@@ -104,50 +138,111 @@ export async function POST(request: Request) {
       }
 
       try {
-      // Determine which channels to run based on product vertical
+      // Determine which channels to run. Operator override wins; otherwise
+      // fall back to the playbook recommendation. We still fall through to
+      // ALL_CHANNELS only if the playbook produces nothing AND no override
+      // was sent — true safety net rather than a routine path.
       const classification = (bv.classification as { vertical?: Vertical } | undefined)
       const playbook = getPlaybook(classification?.vertical)
-      const channelsToRun = ALL_CHANNELS.filter((c) =>
+      const playbookChannels = ALL_CHANNELS.filter((c) =>
         playbook.primary_channels.includes(c) || playbook.secondary_channels.includes(c)
       )
-      const CHANNELS = channelsToRun.length > 0 ? channelsToRun : ALL_CHANNELS
+      const CHANNELS = overrideChannels && overrideChannels.length > 0
+        ? overrideChannels
+        : (playbookChannels.length > 0 ? playbookChannels : [...ALL_CHANNELS])
 
-      send('start', { channels: CHANNELS, vertical: classification?.vertical ?? 'other', playbook: { kpis: playbook.kpis, launch_tactics: playbook.launch_tactics } })
+      send('start', {
+        channels: CHANNELS,
+        vertical: classification?.vertical ?? 'other',
+        playbook: { kpis: playbook.kpis, launch_tactics: playbook.launch_tactics },
+        overrides: {
+          channels: overrideChannels !== null,
+          goal: overrideGoal !== null,
+          angle: overrideAngle !== null,
+          campaign_reused: reuseCampaignId !== null,
+        },
+      })
 
       const track: TrackOpts = { userId: user.id, projectId }
+
+      // When re-launching the same campaign, inject the persisted learning
+      // summary so CMO / SEO / channel generators build on what worked.
+      const launchCtx: LaunchContext = { ...ctx }
+      if (reuseCampaignId) {
+        const { data: preCamp } = await supabase
+          .from('campaigns')
+          .select('metadata')
+          .eq('id', reuseCampaignId)
+          .eq('user_id', user.id)
+          .maybeSingle() as { data: { metadata: Record<string, unknown> | null } | null }
+        const raw = preCamp?.metadata?.learning_summary
+        const text = learningSummaryToPrompt(raw)
+        if (text) launchCtx.priorCampaignLearnings = text
+      }
 
       // —————— AGENT CHAIN ——————
       // Step 1: CMO produces the strategic brief
       send('agent_status', { agent: 'cmo', status: 'working', label: 'CMO setting strategy…' })
-      const brief = await withRetries(() => cmoStrategist(ctx, track), 'cmo')
+      const brief = await withRetries(() => cmoStrategist(launchCtx, track), 'cmo')
       send('agent_status', { agent: 'cmo', status: 'done', output: brief })
 
       // Step 2: SEO specialist designs keyword plan off the brief
       send('agent_status', { agent: 'seo', status: 'working', label: 'SEO researching keywords…' })
-      const seoPlan = await withRetries(() => seoSpecialist(ctx, brief, track), 'seo')
+      const seoPlan = await withRetries(() => seoSpecialist(launchCtx, brief, track), 'seo')
       send('agent_status', { agent: 'seo', status: 'done', output: seoPlan })
 
       // Step 3: Analytics sets experiments + UTM scheme (parallel with channels)
-      const analyticsPromise = withRetries(() => analyticsAgent(ctx, brief, track), 'analytics').catch((e) => {
+      const analyticsPromise = withRetries(() => analyticsAgent(launchCtx, brief, track), 'analytics').catch((e) => {
         console.error('[launch][analytics]', e); return null
       })
 
-      // Create a campaign row to tie everything together
-      const { data: campaign } = await supabase.from('campaigns').insert({
-        user_id: user.id, project_id: projectId,
-        name: `Launch · ${new Date().toISOString().slice(0, 10)}`,
-        status: 'draft',
-        channels: CHANNELS as unknown as string[],
-        kpis: {},
-        metadata: {
-          launch_run: true,
-          started_at: new Date().toISOString(),
-          brief,
-          seo_plan: seoPlan,
-        },
-      }).select().single()
-
-      const campaignId = campaign?.id ?? null
+      // Create a campaign row to tie everything together, OR reuse an
+      // existing campaign if the operator passed campaignId (lets the
+      // Campaign Command Center re-run a launch and keep all assets stitched
+      // to the same campaign id rather than orphaning them under a fresh row).
+      let campaignId: string | null = null
+      if (reuseCampaignId) {
+        const { data: existing } = await supabase
+          .from('campaigns')
+          .select('id, metadata')
+          .eq('id', reuseCampaignId)
+          .eq('user_id', user.id)
+          .maybeSingle() as { data: { id: string; metadata: Record<string, unknown> | null } | null }
+        if (existing) {
+          campaignId = existing.id
+          await supabase.from('campaigns').update({
+            metadata: {
+              ...(existing.metadata ?? {}),
+              launch_run: true,
+              started_at: new Date().toISOString(),
+              brief,
+              seo_plan: seoPlan,
+              goal_override: overrideGoal,
+              angle_override: overrideAngle,
+              channels_override: overrideChannels,
+            },
+          }).eq('id', existing.id)
+        }
+      }
+      if (!campaignId) {
+        const { data: campaign } = await supabase.from('campaigns').insert({
+          user_id: user.id, project_id: projectId,
+          name: `Launch · ${new Date().toISOString().slice(0, 10)}`,
+          status: 'draft',
+          channels: CHANNELS as unknown as string[],
+          kpis: {},
+          metadata: {
+            launch_run: true,
+            started_at: new Date().toISOString(),
+            brief,
+            seo_plan: seoPlan,
+            goal_override: overrideGoal,
+            angle_override: overrideAngle,
+            channels_override: overrideChannels,
+          },
+        }).select().single()
+        campaignId = campaign?.id ?? null
+      }
 
       // Enhance context with brief + SEO + market intel for every channel
       const marketIntel = bv.market_intel as Record<string, unknown> | undefined
@@ -160,9 +255,16 @@ export async function POST(request: Request) {
 - Avoid: ${Array.isArray(marketIntel.avoid_topics) ? (marketIntel.avoid_topics as string[]).join(' · ') : ''}`
         : ''
 
+      // Splice operator overrides into the value-prop block that every
+      // channel generator sees. Keeps the existing single-string brand-context
+      // contract instead of growing the LaunchContext schema across 8 generators.
+      const operatorBlock = (overrideGoal || overrideAngle)
+        ? `\n\nOPERATOR DIRECTIVES (treat as highest priority):${overrideGoal ? `\n- Campaign goal: ${overrideGoal}` : ''}${overrideAngle ? `\n- Narrative angle: ${overrideAngle}` : ''}`
+        : ''
+
       const enrichedCtx: LaunchContext = {
-        ...ctx,
-        valueProp: `${ctx.valueProp}\n\nCAMPAIGN NARRATIVE: ${brief.core_narrative}\nAUDIENCE INSIGHT: ${brief.audience_insight}\nTOP THEMES: ${brief.top_3_themes.join(' · ')}\nSEO FOCUS: ${seoPlan.cluster_pillar}${marketContext}`,
+        ...launchCtx,
+        valueProp: `${launchCtx.valueProp}\n\nCAMPAIGN NARRATIVE: ${brief.core_narrative}\nAUDIENCE INSIGHT: ${brief.audience_insight}\nTOP THEMES: ${brief.top_3_themes.join(' · ')}\nSEO FOCUS: ${seoPlan.cluster_pillar}${marketContext}${operatorBlock}`,
       }
 
       // Step 4: Run all channels in parallel, each saves its own rows
@@ -191,7 +293,7 @@ export async function POST(request: Request) {
       send('agent_status', { agent: 'director', status: 'working', label: 'Director reviewing campaign…' })
       let review = null
       try {
-        review = await withRetries(() => directorReview(ctx, brief, seoPlan, channelOutputs, track), 'director')
+        review = await withRetries(() => directorReview(launchCtx, brief, seoPlan, channelOutputs, track), 'director')
         send('agent_status', { agent: 'director', status: 'done', output: review })
       } catch (err) {
         console.error('[launch][director]', err)
@@ -228,9 +330,18 @@ export async function POST(request: Request) {
 
       // Persist agent outputs to campaign metadata
       if (campaignId) {
+        const { data: curRow } = await supabase
+          .from('campaigns')
+          .select('metadata')
+          .eq('id', campaignId)
+          .maybeSingle() as { data: { metadata: Record<string, unknown> | null } | null }
+        const prevMeta = (curRow?.metadata && typeof curRow.metadata === 'object')
+          ? (curRow.metadata as Record<string, unknown>)
+          : {}
         await supabase.from('campaigns').update({
           status: 'active',
           metadata: {
+            ...prevMeta,
             launch_run: true,
             brief,
             seo_plan: seoPlan,
@@ -339,12 +450,14 @@ async function runChannel(
           }
         }
       }
-      // Organic posts go to social_posts, unchanged
+      // Organic posts go to social_posts with the campaign_id so the
+      // Campaign Command Center can aggregate them by campaign.
       for (const p of assets.organic_posts) {
         await supabase.from('social_posts').insert({
-          user_id: userId, project_id: projectId, platform: 'linkedin',
+          user_id: userId, project_id: projectId, campaign_id: campaignId, platform: 'linkedin',
           content: `${p.text}\n\n${p.hashtags.map((h) => `#${h}`).join(' ')}`,
           status: 'draft', ai_generated: true,
+          metadata: { launch_run: true },
         })
       }
       return `3 LinkedIn variants (${assets.variants.map((v) => v.hook_framework).join(' / ')}) + ${assets.organic_posts.length} organic posts`
@@ -353,7 +466,7 @@ async function runChannel(
       const { reels } = await withRetries(() => genTikTokAssets(ctx, track), 'tiktok')
       for (const reel of reels) {
         await supabase.from('social_posts').insert({
-          user_id: userId, project_id: projectId, platform: 'tiktok',
+          user_id: userId, project_id: projectId, campaign_id: campaignId, platform: 'tiktok',
           content: `HOOK: ${reel.hook}\n\nSCRIPT:\n${reel.script}\n\nCAPTION:\n${reel.caption}\n\n${reel.hashtags.map((h) => `#${h}`).join(' ')}`,
           status: 'draft', ai_generated: true,
           metadata: { launch_run: true, thumbnail_prompt: reel.thumbnail_prompt },
@@ -363,16 +476,15 @@ async function runChannel(
     }
     case 'twitter': {
       const thread = await withRetries(() => genTwitterThread(ctx, track), 'twitter')
-      // Save thread as one post with full text, plus each standalone
       await supabase.from('social_posts').insert({
-        user_id: userId, project_id: projectId, platform: 'twitter',
+        user_id: userId, project_id: projectId, campaign_id: campaignId, platform: 'twitter',
         content: thread.thread.sort((a, b) => a.position - b.position).map((t, i) => `[${i + 1}/${thread.thread.length}] ${t.text}`).join('\n\n'),
         status: 'draft', ai_generated: true,
         metadata: { launch_run: true, type: 'thread' },
       })
       for (const t of thread.standalone_tweets) {
         await supabase.from('social_posts').insert({
-          user_id: userId, project_id: projectId, platform: 'twitter',
+          user_id: userId, project_id: projectId, campaign_id: campaignId, platform: 'twitter',
           content: t.text, status: 'draft', ai_generated: true,
           metadata: { launch_run: true, image_prompt: t.image_prompt ?? null },
         })
@@ -384,7 +496,7 @@ async function runChannel(
       const { posts } = await withRetries(() => genRedditPosts(ctx, voice, track), 'reddit')
       for (const p of posts) {
         await supabase.from('social_posts').insert({
-          user_id: userId, project_id: projectId, platform: 'reddit',
+          user_id: userId, project_id: projectId, campaign_id: campaignId, platform: 'reddit',
           content: `r/${p.subreddit}\n\nTITLE: ${p.title}\n\n${p.body_markdown}`,
           status: 'draft', ai_generated: true,
           metadata: { launch_run: true, subreddit: p.subreddit, post_type: p.post_type, title: p.title },

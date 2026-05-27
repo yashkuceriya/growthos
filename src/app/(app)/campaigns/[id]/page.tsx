@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useParams } from 'next/navigation'
+import { useEffect, useMemo, useState } from 'react'
+import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { PageShell } from '@/components/ui/page-shell'
@@ -9,8 +9,13 @@ import { PageHeader } from '@/components/ui/page-header'
 import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { JsonView } from '@/components/ui/json-viewer'
-import { ChevronLeft, FileText, Mail, MessageSquare, Globe, Target, Trophy, Archive } from 'lucide-react'
+import { ChevronLeft, FileText, Mail, MessageSquare, Globe, Target, Trophy, Archive, Rocket, Users, Download, ExternalLink, Copy, Link as LinkIcon } from 'lucide-react'
 import { toast } from 'sonner'
+import { ManualMetricsLogger } from '@/components/campaigns/manual-metrics-logger'
+import { LearningSummaryPanel } from '@/components/campaigns/learning-summary'
+import { LaunchScheduleStrip } from '@/components/campaigns/launch-schedule-strip'
+import { NextBestActionPanel } from '@/components/dashboard/next-best-action'
+import { buildAssetTrackingUrl, campaignSlugFor, composerLabelFor, composerLinkFor } from '@/lib/publishing/links'
 
 interface Campaign {
   id: string
@@ -18,6 +23,7 @@ interface Campaign {
   description: string | null
   status: string
   channels: string[]
+  project_id: string
   metadata: Record<string, unknown> | null
   created_at: string
 }
@@ -33,40 +39,100 @@ interface AdCopyRow {
   hook_framework: string | null
   ad_briefs: { platform: string } | null
 }
-interface ContentRow { id: string; title: string; slug: string; word_count: number | null; status: string }
-interface LandingRow { id: string; name: string; slug: string; published: boolean; visits: number }
-interface LeadRow { id: string; email: string; utm_source: string | null; utm_campaign: string | null; created_at: string; status: string }
+
+type AssetKind = 'ad' | 'social_post' | 'blog' | 'landing' | 'lead'
+type AssetTone = 'success' | 'warn' | 'info' | 'neutral' | 'accent' | 'error'
+
+interface UnifiedAsset {
+  id: string
+  kind: AssetKind
+  channel: string
+  title: string
+  body: string | null
+  status: string
+  status_tone: AssetTone
+  href: string | null
+  metadata: Record<string, unknown>
+  created_at: string | null
+}
+
+interface AssetsResponse {
+  assets: UnifiedAsset[]
+  summary: { ads: number; social: number; blogs: number; landings: number; leads: number }
+  projectEmails: Array<{ id: string; title: string; subject: string; category: string | null; is_winner: boolean; created_at: string | null }>
+}
+
+const KIND_LABELS: Record<AssetKind, string> = {
+  ad: 'Ads',
+  social_post: 'Social',
+  blog: 'Content',
+  landing: 'Landing',
+  lead: 'Leads',
+}
 
 export default function CampaignDetailPage() {
   const params = useParams<{ id: string }>()
+  const router = useRouter()
   const supabase = createClient()
   const [campaign, setCampaign] = useState<Campaign | null>(null)
+  const [projectWebsite, setProjectWebsite] = useState<string | null>(null)
   const [ads, setAds] = useState<AdCopyRow[]>([])
-  const [contents, setContents] = useState<ContentRow[]>([])
-  const [landings, setLandings] = useState<LandingRow[]>([])
-  const [leads, setLeads] = useState<LeadRow[]>([])
+  const [boardAssets, setBoardAssets] = useState<UnifiedAsset[]>([])
+  const [summary, setSummary] = useState<AssetsResponse['summary'] | null>(null)
+  const [projectEmails, setProjectEmails] = useState<AssetsResponse['projectEmails']>([])
+  const [activeKind, setActiveKind] = useState<AssetKind | 'all'>('all')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!params.id) return
-    ;(async () => {
-      setLoading(true)
-      const [cRes, aRes, cpRes, lpRes, ldRes] = await Promise.all([
-        supabase.from('campaigns').select('*').eq('id', params.id).single(),
-        supabase.from('ad_copies').select('id, headline, primary_text, status, is_best, variant_group, variant_label, hook_framework, ad_briefs!inner(platform, campaign_id)').eq('ad_briefs.campaign_id', params.id),
-        supabase.from('content_pieces').select('id, title, slug, word_count, status').eq('campaign_id', params.id),
-        supabase.from('landing_pages').select('id, name, slug, published, visits').eq('campaign_id', params.id),
-        supabase.from('leads').select('id, email, utm_source, utm_campaign, created_at, status').eq('campaign_id', params.id).order('created_at', { ascending: false }).limit(50),
-      ])
-      setCampaign(cRes.data as Campaign | null)
-      setAds((aRes.data ?? []) as unknown as AdCopyRow[])
-      setContents((cpRes.data ?? []) as ContentRow[])
-      setLandings((lpRes.data ?? []) as LandingRow[])
-      setLeads((ldRes.data ?? []) as LeadRow[])
-      setLoading(false)
-    })()
+    void loadAll()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id])
+
+  async function loadAll() {
+    setLoading(true)
+    const [cRes, assetsRes, adsForPromoteRes] = await Promise.all([
+      supabase
+        .from('campaigns')
+        .select('id, name, description, status, channels, project_id, metadata, created_at')
+        .eq('id', params.id)
+        .single(),
+      fetch(`/api/campaigns/${params.id}/assets`),
+      // Variant-aware ad rows still feed AdVariantGroups for the
+      // promote-winner action; the unified API gives the headline view.
+      supabase
+        .from('ad_copies')
+        .select('id, headline, primary_text, status, is_best, variant_group, variant_label, hook_framework, ad_briefs!inner(platform, campaign_id)')
+        .eq('ad_briefs.campaign_id', params.id),
+    ])
+    const campaignRow = cRes.data as Campaign | null
+    setCampaign(campaignRow)
+    if (campaignRow?.project_id) {
+      const { data: projectRow } = await supabase
+        .from('projects')
+        .select('website')
+        .eq('id', campaignRow.project_id)
+        .maybeSingle()
+      setProjectWebsite((projectRow as { website?: string | null } | null)?.website ?? null)
+    }
+
+    if (assetsRes.ok) {
+      const body = (await assetsRes.json()) as AssetsResponse
+      setBoardAssets(body.assets)
+      setSummary(body.summary)
+      setProjectEmails(body.projectEmails)
+    } else {
+      toast.error('Failed to load campaign assets')
+    }
+
+    setAds((adsForPromoteRes.data ?? []) as unknown as AdCopyRow[])
+    setLoading(false)
+  }
+
+  const filteredAssets = useMemo(() => {
+    if (activeKind === 'all') return boardAssets
+    return boardAssets.filter((a) => a.kind === activeKind)
+  }, [boardAssets, activeKind])
 
   if (loading) return <PageShell><p className="text-slate-400">Loading…</p></PageShell>
   if (!campaign) return <PageShell><p className="text-slate-400">Campaign not found</p></PageShell>
@@ -84,9 +150,26 @@ export default function CampaignDetailPage() {
         title={campaign.name}
         subtitle={campaign.description ?? `Created ${new Date(campaign.created_at).toLocaleDateString()}`}
         actions={
-          <Link href="/campaigns" className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-100">
-            <ChevronLeft className="h-3.5 w-3.5" /> Back
-          </Link>
+          <div className="flex items-center gap-2">
+            <a
+              href={`/api/campaigns/${campaign.id}/export`}
+              download
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-200 hover:bg-slate-800"
+              title="Download a markdown launch checklist with tracked URLs"
+            >
+              <Download className="h-3.5 w-3.5" /> Pack
+            </a>
+            <button
+              onClick={() => router.push(`/launch?campaignId=${campaign.id}`)}
+              className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-950 hover:bg-emerald-400"
+              title="Re-run launch and attach new assets to this campaign"
+            >
+              <Rocket className="h-3.5 w-3.5" /> Re-launch
+            </button>
+            <Link href="/campaigns" className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-100">
+              <ChevronLeft className="h-3.5 w-3.5" /> Back
+            </Link>
+          </div>
         }
       />
 
@@ -97,12 +180,79 @@ export default function CampaignDetailPage() {
         ))}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4 mb-4">
-        <StatCard icon={<Target className="h-4 w-4" />} label="Ad copies" value={ads.length} />
-        <StatCard icon={<FileText className="h-4 w-4" />} label="Content" value={contents.length} />
-        <StatCard icon={<Globe className="h-4 w-4" />} label="Landing pages" value={landings.length} />
-        <StatCard icon={<Mail className="h-4 w-4" />} label="Leads captured" value={leads.length} />
+      <div className="grid gap-4 md:grid-cols-5 mb-4">
+        <StatCard icon={<Target className="h-4 w-4" />} label="Ad copies" value={summary?.ads ?? ads.length} onClick={() => setActiveKind('ad')} active={activeKind === 'ad'} />
+        <StatCard icon={<MessageSquare className="h-4 w-4" />} label="Social" value={summary?.social ?? 0} onClick={() => setActiveKind('social_post')} active={activeKind === 'social_post'} />
+        <StatCard icon={<FileText className="h-4 w-4" />} label="Content" value={summary?.blogs ?? 0} onClick={() => setActiveKind('blog')} active={activeKind === 'blog'} />
+        <StatCard icon={<Globe className="h-4 w-4" />} label="Landing" value={summary?.landings ?? 0} onClick={() => setActiveKind('landing')} active={activeKind === 'landing'} />
+        <StatCard icon={<Users className="h-4 w-4" />} label="Leads" value={summary?.leads ?? 0} onClick={() => setActiveKind('lead')} active={activeKind === 'lead'} />
       </div>
+
+      <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-slate-800 bg-slate-900/40 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+        <span className="text-slate-500">Create & attach</span>
+        <Link href={`/ad-studio/generate?campaignId=${campaign.id}`} className="text-emerald-300 hover:text-emerald-200">
+          Ad Generate
+        </Link>
+        <span className="text-slate-600 hidden sm:inline">·</span>
+        <Link href={`/social?campaignId=${campaign.id}`} className="text-emerald-300 hover:text-emerald-200">
+          Social
+        </Link>
+        <span className="text-slate-600 hidden sm:inline">·</span>
+        <Link href={`/content?campaignId=${campaign.id}`} className="text-emerald-300 hover:text-emerald-200">
+          Content
+        </Link>
+      </div>
+
+      <div className="mb-4 grid gap-4 md:grid-cols-2">
+        <NextBestActionPanel projectId={campaign.project_id} campaignId={campaign.id} title="Next best action · this campaign" />
+        <LaunchScheduleStrip assets={boardAssets} />
+      </div>
+
+      {/* Unified asset board — single tabbed view across every asset type
+          attached to the campaign. Stat cards above act as filter chips. */}
+      <SectionPanel
+        title={
+          <span className="flex items-center gap-2">
+            Campaign Command Center
+            <StatusPill tone="neutral">{filteredAssets.length} asset{filteredAssets.length === 1 ? '' : 's'}</StatusPill>
+          </span>
+        }
+        contentClassName="p-0"
+      >
+        <div className="flex items-center gap-2 border-b border-slate-800 px-4 py-2">
+          <button
+            onClick={() => setActiveKind('all')}
+            className={`rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${activeKind === 'all' ? 'bg-emerald-500/15 text-emerald-300' : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            All
+          </button>
+          {(Object.keys(KIND_LABELS) as AssetKind[]).map((k) => (
+            <button
+              key={k}
+              onClick={() => setActiveKind(k)}
+              className={`rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${activeKind === k ? 'bg-emerald-500/15 text-emerald-300' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              {KIND_LABELS[k]}
+            </button>
+          ))}
+        </div>
+        {filteredAssets.length === 0 ? (
+          <div className="px-4 py-8 text-center text-sm text-slate-500">
+            No {activeKind === 'all' ? 'assets' : KIND_LABELS[activeKind as AssetKind].toLowerCase()} attached to this campaign yet.
+          </div>
+        ) : (
+          <ul className="divide-y divide-slate-800">
+            {filteredAssets.map((a) => (
+              <AssetRow
+                key={`${a.kind}:${a.id}`}
+                asset={a}
+                campaignSlug={campaignSlugFor(campaign.name, campaign.id)}
+                projectWebsite={projectWebsite}
+              />
+            ))}
+          </ul>
+        )}
+      </SectionPanel>
 
       {directorReview ? (
         <SectionPanel title="Director Review">
@@ -135,7 +285,7 @@ export default function CampaignDetailPage() {
       ) : null}
 
       {ads.length > 0 && (
-        <SectionPanel title={`Ad Variants (${ads.length})`}>
+        <SectionPanel title={`Ad Variants & Winner Picker (${ads.length})`}>
           <AdVariantGroups
             ads={ads}
             onPromote={async (adCopyId) => {
@@ -146,81 +296,134 @@ export default function CampaignDetailPage() {
               const json = await res.json()
               if (!res.ok) { toast.error(json.error ?? 'Failed'); return }
               toast.success(`Winner promoted · ${json.archived} sibling${json.archived === 1 ? '' : 's'} archived`)
-              // Optimistic refetch
-              const { data: refreshed } = await supabase.from('ad_copies').select('id, headline, primary_text, status, is_best, variant_group, variant_label, hook_framework, ad_briefs!inner(platform, campaign_id)').eq('ad_briefs.campaign_id', params.id)
-              setAds((refreshed ?? []) as unknown as AdCopyRow[])
+              await loadAll()
             }}
           />
         </SectionPanel>
       )}
 
-      {contents.length > 0 && (
-        <SectionPanel title={`Content (${contents.length})`} contentClassName="p-0">
-          <ul className="divide-y divide-slate-800">
-            {contents.map((c) => (
-              <li key={c.id} className="px-4 py-2.5 flex items-center gap-3">
-                <FileText className="h-4 w-4 text-slate-500" />
-                <Link href={`/content`} className="flex-1 font-semibold text-slate-100 hover:text-emerald-300">{c.title}</Link>
-                <span className="text-xs text-slate-500 font-mono-data">{c.word_count ?? 0} words</span>
-                <StatusPill tone="neutral">{c.status}</StatusPill>
-              </li>
-            ))}
-          </ul>
-        </SectionPanel>
-      )}
+      <LearningSummaryPanel campaignId={campaign.id} />
 
-      {landings.length > 0 && (
-        <SectionPanel title={`Landing Pages (${landings.length})`} contentClassName="p-0">
+      <ManualMetricsLogger campaignId={campaign.id} channels={campaign.channels} />
+
+      {projectEmails.length > 0 && (
+        <SectionPanel title="Recent email templates (project)" contentClassName="p-0">
           <ul className="divide-y divide-slate-800">
-            {landings.map((p) => (
-              <li key={p.id} className="px-4 py-2.5 flex items-center gap-3">
-                <Globe className="h-4 w-4 text-slate-500" />
-                <div className="flex-1">
-                  <div className="font-semibold text-slate-100">{p.name}</div>
-                  <a href={`/p/${p.slug}`} target="_blank" rel="noreferrer" className="text-xs text-emerald-400 hover:underline">/p/{p.slug}</a>
+            {projectEmails.map((e) => (
+              <li key={e.id} className="px-4 py-2.5 flex items-center gap-3">
+                <Mail className="h-4 w-4 text-slate-500" />
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-slate-100 flex items-center gap-1.5">
+                    {e.title}
+                    {e.is_winner && <Trophy className="h-3 w-3 text-emerald-400" />}
+                  </div>
+                  <div className="text-xs text-slate-500 truncate">{e.subject}</div>
                 </div>
-                <span className="text-xs text-slate-500 font-mono-data">{p.visits} visits</span>
-                <StatusPill tone="neutral">{p.published ? 'published' : 'draft'}</StatusPill>
+                {e.category && <StatusPill tone="neutral">{e.category}</StatusPill>}
               </li>
             ))}
           </ul>
-        </SectionPanel>
-      )}
-
-      {leads.length > 0 && (
-        <SectionPanel title={`Leads from this campaign (${leads.length})`} contentClassName="p-0">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-800">
-                <th className="px-4 py-2.5 text-left">Email</th>
-                <th className="px-4 py-2.5 text-left">UTM source</th>
-                <th className="px-4 py-2.5 text-left">UTM campaign</th>
-                <th className="px-4 py-2.5 text-left">Captured</th>
-                <th className="px-4 py-2.5 text-left">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800">
-              {leads.map((l) => (
-                <tr key={l.id}>
-                  <td className="px-4 py-2.5 text-slate-100">{l.email}</td>
-                  <td className="px-4 py-2.5 text-xs text-slate-400">{l.utm_source ?? '—'}</td>
-                  <td className="px-4 py-2.5 text-xs text-slate-400">{l.utm_campaign ?? '—'}</td>
-                  <td className="px-4 py-2.5 text-xs text-slate-500">{new Date(l.created_at).toLocaleString()}</td>
-                  <td className="px-4 py-2.5"><StatusPill tone="neutral">{l.status}</StatusPill></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </SectionPanel>
       )}
 
       <SectionPanel title="Raw campaign metadata">
         <JsonView data={meta} />
       </SectionPanel>
-
-      {/* Glance at the other channels that didn't get a column */}
-      <MessageSection campaignId={campaign.id} />
     </PageShell>
+  )
+}
+
+function AssetRow({ asset: a, campaignSlug, projectWebsite }: {
+  asset: UnifiedAsset
+  campaignSlug: string
+  projectWebsite: string | null
+}) {
+  // Compute a destination + tracked URL for the asset. We prefer the
+  // published URL (only social_post carries one), then the project website,
+  // then nothing (omits the action).
+  const publishedUrl = a.kind === 'social_post' && a.href && /^https?:/i.test(a.href) ? a.href : null
+  const destination = publishedUrl ?? projectWebsite ?? null
+  const trackedUrl = destination
+    ? buildAssetTrackingUrl({
+        destination,
+        campaignSlug,
+        channel: a.channel,
+        assetId: a.id,
+        assetKind: a.kind,
+      })
+    : null
+  // Composer URL only useful for social-class assets where a platform composer exists.
+  const composerHref = a.kind === 'social_post'
+    ? composerLinkFor({ platform: a.channel, text: a.body ?? a.title, url: trackedUrl ?? destination ?? undefined })
+    : null
+  const copyable = a.body && a.body.trim().length > 0 ? a.body : a.title
+
+  return (
+    <li className="px-4 py-3">
+      <div className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3">
+        <span className="font-mono-data text-[10px] uppercase tracking-wider text-slate-500 w-16">
+          {a.kind === 'social_post' ? 'social' : a.kind}
+        </span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            {a.href
+              ? <Link href={a.href} className="font-semibold text-slate-100 hover:text-emerald-300 truncate">{a.title}</Link>
+              : <span className="font-semibold text-slate-100 truncate">{a.title}</span>
+            }
+            {a.metadata.is_winner === true && <span title="Promoted winner"><Trophy className="h-3 w-3 text-emerald-400" /></span>}
+            {a.metadata.is_best === true && <span title="Best variant"><Trophy className="h-3 w-3 text-emerald-400" /></span>}
+          </div>
+          {a.body && <div className="text-xs text-slate-500 line-clamp-1">{a.body}</div>}
+        </div>
+        <StatusPill tone="neutral">{a.channel}</StatusPill>
+        <StatusPill tone={a.status_tone}>{a.status}</StatusPill>
+      </div>
+      {(copyable || trackedUrl || composerHref) && (
+        <div className="mt-2 ml-[4.75rem] flex flex-wrap items-center gap-1.5">
+          {copyable && (
+            <button
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(copyable)
+                  toast.success('Copied to clipboard')
+                } catch {
+                  toast.error('Could not copy')
+                }
+              }}
+              className="inline-flex items-center gap-1 rounded border border-slate-800 bg-slate-900/60 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-800"
+            >
+              <Copy className="h-3 w-3" /> Copy
+            </button>
+          )}
+          {trackedUrl && (
+            <button
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(trackedUrl)
+                  toast.success('Tracked URL copied')
+                } catch {
+                  toast.error('Could not copy')
+                }
+              }}
+              className="inline-flex items-center gap-1 rounded border border-slate-800 bg-slate-900/60 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-800"
+              title={trackedUrl}
+            >
+              <LinkIcon className="h-3 w-3" /> Tracked URL
+            </button>
+          )}
+          {composerHref && (
+            <a
+              href={composerHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-200 hover:bg-emerald-500/20"
+            >
+              <ExternalLink className="h-3 w-3" /> {composerLabelFor(a.channel)}
+            </a>
+          )}
+        </div>
+      )}
+    </li>
   )
 }
 
@@ -292,71 +495,19 @@ function AdVariantGroups({ ads, onPromote }: { ads: AdCopyRow[]; onPromote: (id:
   )
 }
 
-function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
-  return (
-    <div className="rounded-md border border-slate-700 bg-slate-800/50 p-4">
+function StatCard({
+  icon, label, value, onClick, active,
+}: { icon: React.ReactNode; label: string; value: number; onClick?: () => void; active?: boolean }) {
+  const className = `rounded-md border p-4 text-left transition-colors ${active ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-slate-700 bg-slate-800/50'} ${onClick ? 'hover:border-emerald-500/40 hover:bg-slate-800' : ''}`
+  const content = (
+    <>
       <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
         {icon}{label}
       </div>
       <div className="mt-2 text-2xl font-bold text-slate-100 font-mono-data">{value}</div>
-    </div>
-  )
-}
-
-function MessageSection({ campaignId }: { campaignId: string }) {
-  const supabase = createClient()
-  const [social, setSocial] = useState<Array<{ id: string; platform: string; content: string; status: string }>>([])
-  const [emails, setEmails] = useState<Array<{ id: string; name: string; status: string }>>([])
-
-  useEffect(() => {
-    ;(async () => {
-      // social_posts and email_sequences don't carry campaign_id today — pull everything
-      // for the project and filter by metadata.launch_run where possible.
-      // Kept minimal: just list recent social posts and email sequences for the project.
-      const { data: c } = await supabase.from('campaigns').select('project_id').eq('id', campaignId).single()
-      if (!c?.project_id) return
-      const [socRes, seqRes] = await Promise.all([
-        supabase.from('social_posts').select('id, platform, content, status').eq('project_id', c.project_id).order('created_at', { ascending: false }).limit(15),
-        supabase.from('email_sequences').select('id, name, status').eq('project_id', c.project_id).order('created_at', { ascending: false }).limit(5),
-      ])
-      setSocial(socRes.data ?? [])
-      setEmails(seqRes.data ?? [])
-    })()
-  }, [campaignId, supabase])
-
-  if (social.length === 0 && emails.length === 0) return null
-
-  return (
-    <>
-      {social.length > 0 && (
-        <SectionPanel title={`Recent social posts (project)`} contentClassName="p-0">
-          <ul className="divide-y divide-slate-800">
-            {social.map((s) => (
-              <li key={s.id} className="px-4 py-2.5 flex items-start gap-3">
-                <MessageSquare className="h-4 w-4 mt-0.5 text-slate-500" />
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs font-semibold uppercase text-slate-500">{s.platform}</div>
-                  <div className="text-sm text-slate-200 line-clamp-2">{s.content}</div>
-                </div>
-                <StatusPill tone="neutral">{s.status}</StatusPill>
-              </li>
-            ))}
-          </ul>
-        </SectionPanel>
-      )}
-      {emails.length > 0 && (
-        <SectionPanel title="Email sequences (project)" contentClassName="p-0">
-          <ul className="divide-y divide-slate-800">
-            {emails.map((e) => (
-              <li key={e.id} className="px-4 py-2.5 flex items-center gap-3">
-                <Mail className="h-4 w-4 text-slate-500" />
-                <span className="flex-1 text-slate-100">{e.name}</span>
-                <StatusPill tone="neutral">{e.status}</StatusPill>
-              </li>
-            ))}
-          </ul>
-        </SectionPanel>
-      )}
     </>
   )
+  if (onClick) return <button type="button" onClick={onClick} className={className}>{content}</button>
+  return <div className={className}>{content}</div>
 }
+

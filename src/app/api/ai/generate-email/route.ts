@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { generateEmailCopy } from '@/lib/ai/email/generator'
 import { trackAICost, estimateCost } from '@/lib/cost-tracker'
-import { getFounderVoiceContext } from '@/lib/ai/voice/founder-voice'
+import { getMarketingMemory, marketingMemoryPrompt } from '@/lib/marketing/memory'
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -15,19 +15,30 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Missing required fields' }, { status: 400 })
   }
 
-  // Pull proven email patterns — winner-tick promotes top open/click templates
-  // into style_references with asset_kind='email_template'.
-  const styleContext = await getFounderVoiceContext(user.id, 'email_template').catch(() => '')
+  // Unified marketing memory — brand, blueprint, founder voice, and
+  // promoted-winner email templates in one block. Skipped for ad-hoc
+  // generations without a projectId.
+  const memory = projectId
+    ? await getMarketingMemory({
+        supabase,
+        userId: user.id,
+        projectId,
+        assetKind: 'email_template',
+      })
+    : null
+  const memoryBlock = memory ? marketingMemoryPrompt(memory, 'email') : ''
+  const styleContext = [memoryBlock, brandVoice].filter(Boolean).join('\n\n').trim() || undefined
 
   const result = await generateEmailCopy({
     purpose,
     audience,
     tone,
-    brandVoice,
+    // Memory covers brand context inside styleContext; avoid double-printing.
+    brandVoice: undefined,
     productName,
     keyPoints,
     emailType,
-    styleContext: styleContext || undefined,
+    styleContext,
   })
 
   const model = 'google/gemini-2.0-flash-001'

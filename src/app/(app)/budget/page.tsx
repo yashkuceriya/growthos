@@ -58,9 +58,19 @@ export default function BudgetPage() {
     setCampaigns(camps)
     const ids = camps.map((c) => c.id)
     if (ids.length > 0) {
-      const allocRes = await supabase.from('budget_allocations').select('*').in('campaign_id', ids).order('created_at', { ascending: false })
+      const allocRes = await supabase
+        .from('budget_allocations')
+        .select('id, campaign_id, channel, planned_amount, period_start, period_end')
+        .in('campaign_id', ids)
+        .order('created_at', { ascending: false })
       const allocIds = ((allocRes.data as BudgetAllocation[]) ?? []).map((a) => a.id)
-      const expRes = allocIds.length ? await supabase.from('budget_expenses').select('*').in('allocation_id', allocIds).order('date', { ascending: false }) : { data: [] }
+      const expRes = allocIds.length
+        ? await supabase
+          .from('budget_expenses')
+          .select('id, allocation_id, amount, description, date')
+          .in('allocation_id', allocIds)
+          .order('date', { ascending: false })
+        : { data: [] }
       setAllocations((allocRes.data as BudgetAllocation[]) ?? [])
       setExpenses((expRes.data as BudgetExpense[]) ?? [])
     } else {

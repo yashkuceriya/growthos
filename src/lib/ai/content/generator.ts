@@ -22,6 +22,10 @@ interface GenerateBlogParams {
   brandVoice?: string
   outline?: string[]
   wordCount?: number
+  // Pre-formatted block from marketingMemoryPrompt(memory, 'blog'). Carries
+  // brand, blueprint, founder voice, and proven content patterns. Mirrors
+  // the social/email generator's styleContext slot.
+  styleContext?: string
 }
 
 export async function generateBlogPost(params: GenerateBlogParams): Promise<{
@@ -40,7 +44,7 @@ RULES:
 - End with a conclusion + CTA
 - Target word count: ${params.wordCount || 1000} words
 - Write for humans first, search engines second
-${params.brandVoice ? `\nBRAND VOICE: ${params.brandVoice}` : ''}`
+${params.brandVoice ? `\nBRAND VOICE: ${params.brandVoice}` : ''}${params.styleContext ? `\n\n${params.styleContext}` : ''}`
 
   const outlineStr = params.outline?.length
     ? `\nOUTLINE:\n${params.outline.map((s, i) => `${i + 1}. ${s}`).join('\n')}`

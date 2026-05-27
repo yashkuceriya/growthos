@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { rateLimit, clientIp } from './rate-limit'
+import { rateLimit, rateLimitPublic, clientIp } from './rate-limit'
 
 // rate-limit uses a module-level Map. Each test uses a unique key so isolation
 // isn't strictly necessary, but we pin time for determinism.
@@ -7,6 +7,8 @@ import { rateLimit, clientIp } from './rate-limit'
 describe('rateLimit', () => {
   beforeEach(() => {
     vi.useRealTimers()
+    vi.stubEnv('UPSTASH_REDIS_REST_URL', '')
+    vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', '')
   })
 
   it('allows the first call and counts remaining correctly', () => {
@@ -43,6 +45,20 @@ describe('rateLimit', () => {
     expect(rateLimit(key, 1, 1000).ok).toBe(true)
 
     vi.useRealTimers()
+  })
+})
+
+describe('rateLimitPublic', () => {
+  beforeEach(() => {
+    vi.stubEnv('UPSTASH_REDIS_REST_URL', '')
+    vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', '')
+  })
+
+  it('falls back to in-memory limiter when Upstash env is missing', async () => {
+    const r = await rateLimitPublic('test:public-fallback', 2, 1000)
+    expect(r.ok).toBe(true)
+    expect(r.remaining).toBe(1)
+    expect(r.source).toBe('memory')
   })
 })
 

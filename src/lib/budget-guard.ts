@@ -15,6 +15,8 @@ export interface BudgetStatus {
   spent: number
   cap: number | null
   remaining: number | null
+  unavailable?: boolean
+  error?: string
 }
 
 let warnedAboutMissingRpc = false
@@ -29,12 +31,7 @@ async function monthSpend(supabase: SupabaseLike, projectId: string): Promise<nu
     || /could not find the function/i.test(msg)
     || /function .* does not exist/i.test(msg)
 
-  if (!isMissingRpc) {
-    // Other DB error — log but don't block. Fail-open with a warn is the
-    // safer call than 500-ing the whole expensive route.
-    console.warn('[budget-guard] spend RPC errored, treating as 0:', msg)
-    return 0
-  }
+  if (!isMissingRpc) throw new Error(msg || 'project_month_ai_spend failed')
 
   if (!warnedAboutMissingRpc) {
     console.error(
@@ -60,20 +57,43 @@ export async function checkBudget(
   supabase: SupabaseLike,
   projectId: string,
 ): Promise<BudgetStatus> {
-  const [{ data: project }, spent] = await Promise.all([
-    supabase.from('projects').select('monthly_ai_budget_usd').eq('id', projectId).single(),
-    monthSpend(supabase, projectId),
-  ])
+  try {
+    const [{ data: project }, spent] = await Promise.all([
+      supabase.from('projects').select('monthly_ai_budget_usd').eq('id', projectId).single(),
+      monthSpend(supabase, projectId),
+    ])
 
-  const cap = project?.monthly_ai_budget_usd != null ? Number(project.monthly_ai_budget_usd) : null
+    const cap = project?.monthly_ai_budget_usd != null ? Number(project.monthly_ai_budget_usd) : null
 
-  if (cap == null) return { ok: true, spent, cap: null, remaining: null }
+    if (cap == null) return { ok: true, spent, cap: null, remaining: null }
 
-  const remaining = cap - spent
-  return { ok: spent < cap, spent, cap, remaining }
+    const remaining = cap - spent
+    return { ok: spent < cap, spent, cap, remaining }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'unknown budget guard error'
+    console.error('[budget-guard] unable to evaluate budget cap:', msg)
+    return {
+      ok: false,
+      spent: 0,
+      cap: null,
+      remaining: null,
+      unavailable: true,
+      error: msg,
+    }
+  }
 }
 
 export function budgetExceededResponse(status: BudgetStatus): Response {
+  if (status.unavailable) {
+    return Response.json(
+      {
+        error: 'Budget guard temporarily unavailable',
+        reason: status.error ?? 'Could not compute monthly spend',
+      },
+      { status: 503 },
+    )
+  }
+
   return Response.json(
     {
       error: 'Monthly AI budget exceeded',

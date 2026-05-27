@@ -1,8 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { generateSocialPost } from '@/lib/ai/social/generator'
 import { trackAICost, estimateCost } from '@/lib/cost-tracker'
-import { getFounderVoiceContext } from '@/lib/ai/voice/founder-voice'
 import { modeBlock } from '@/lib/ai/creative/modes'
+import { getMarketingMemory, marketingMemoryPrompt } from '@/lib/marketing/memory'
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -16,19 +16,37 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Missing required fields' }, { status: 400 })
   }
 
-  // Pull proven style refs for this platform — winning posts that the
-  // winner-tick cron promoted feed back into future drafts. Append the
-  // creative-mode directive so a "funny twitter post" generation injects
-  // both the proven patterns AND the funny-mode angle.
-  const baseStyle = await getFounderVoiceContext(user.id, `${platform}_post`).catch(() => '')
-  const styleContext = (baseStyle + modeBlock(creativeMode, 'copy')).trim() || undefined
+  // Unified marketing memory keyed on the platform so promoted-winner posts
+  // for THIS platform feed back into the prompt. Falls back gracefully when
+  // no projectId is provided (e.g. one-off ad-hoc posts).
+  const memory = projectId
+    ? await getMarketingMemory({
+        supabase,
+        userId: user.id,
+        projectId,
+        assetKind: `${platform}_post`,
+        channel: platform,
+      })
+    : null
+
+  // Compose the system-prompt block. Memory provides brand, blueprint,
+  // founder voice, and proven style refs in one block. Caller's brandVoice
+  // (if any) gets appended for ad-hoc overrides. Creative-mode directive
+  // tacked on so "funny" mode still bends the angle.
+  const memoryBlock = memory ? marketingMemoryPrompt(memory, 'social_post') : ''
+  const styleContext = [memoryBlock, brandVoice, modeBlock(creativeMode, 'copy')]
+    .filter(Boolean)
+    .join('\n\n')
+    .trim() || undefined
 
   const result = await generateSocialPost({
     platform,
     topic,
     audience,
     tone,
-    brandVoice,
+    // Pass undefined so the generator doesn't double-print brand voice —
+    // memory already covers brand context in styleContext.
+    brandVoice: undefined,
     contentType,
     styleContext,
   })
