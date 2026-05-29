@@ -11,6 +11,7 @@ import {
   Globe, Plus, Rocket, Briefcase, AlertTriangle, Film,
 } from 'lucide-react'
 import { ProjectSwitcher } from './ProjectSwitcher'
+import { LOCAL_DEV_AUTH_COOKIE, hasLocalDevSessionCookie } from '@/lib/local-dev-auth'
 
 const primaryNav = [
   { href: '/agency', label: 'Agency', icon: Briefcase },
@@ -37,7 +38,11 @@ export function AppSidebar() {
   const supabase = createClient()
 
   async function handleSignOut() {
-    await supabase.auth.signOut()
+    if (hasLocalDevSessionCookie(document.cookie)) {
+      document.cookie = `${LOCAL_DEV_AUTH_COOKIE}=; path=/; max-age=0; SameSite=Lax`
+    } else {
+      await supabase.auth.signOut()
+    }
     toast.success('Signed out')
     router.push('/login')
     router.refresh()

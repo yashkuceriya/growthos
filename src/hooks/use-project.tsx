@@ -2,6 +2,8 @@
 
 import { createContext, useContext, useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { LOCAL_DEV_PROJECT_ID, hasLocalDevSessionCookie } from '@/lib/local-dev-auth'
+
 interface Project {
   id: string
   user_id: string
@@ -34,6 +36,32 @@ const ProjectContext = createContext<ProjectContextValue>({
   refetch: async () => {},
 })
 
+const localProject: Project = {
+  id: LOCAL_DEV_PROJECT_ID,
+  user_id: 'local-dev-user',
+  name: 'Local GrowthOS Workspace',
+  slug: 'local-growthos',
+  description: 'Local admin workspace with full UI access.',
+  website: 'https://growthos.local',
+  logo_url: null,
+  brand_voice: {
+    tagline: 'Local marketing command center',
+    value_proposition: 'Plan, create, launch, and inspect growth work from one local cockpit.',
+    tone: ['clear', 'direct', 'operator-friendly'],
+    guidelines: true,
+  },
+  target_audiences: ['founders', 'operators', 'growth teams'],
+  competitors: [],
+  settings: { local_seeded: true },
+  created_at: new Date(0).toISOString(),
+  updated_at: new Date(0).toISOString(),
+}
+
+function hasLocalDevSession() {
+  if (typeof document === 'undefined') return false
+  return hasLocalDevSessionCookie(document.cookie)
+}
+
 export function ProjectProvider({ children }: { children: React.ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([])
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
@@ -41,6 +69,13 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   const supabase = createClient()
 
   async function fetchProjects() {
+    if (hasLocalDevSession()) {
+      setProjects([localProject])
+      setActiveProjectId(LOCAL_DEV_PROJECT_ID)
+      setLoading(false)
+      return
+    }
+
     const { data } = await supabase
       .from('projects')
       .select('*')

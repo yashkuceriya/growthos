@@ -7,6 +7,7 @@ import { useProject } from '@/hooks/use-project'
 import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { BookOpen, Megaphone, Users, DollarSign, ArrowRight, Rocket } from 'lucide-react'
+import { LOCAL_DEV_PROJECT_ID } from '@/lib/local-dev-auth'
 
 interface ProjectSummary {
   id: string
@@ -30,6 +31,23 @@ export function AllProjectsGrid() {
 
   useEffect(() => {
     if (projects.length === 0) { setLoading(false); setSummaries([]); return }
+    if (projects.some((project) => project.id === LOCAL_DEV_PROJECT_ID)) {
+      setSummaries(projects.map((project) => ({
+        id: project.id,
+        name: project.name,
+        slug: project.slug,
+        vertical: 'local_workspace',
+        brand_book_ready: true,
+        intel_ready: false,
+        ads_mtd: 0,
+        leads_7d: 0,
+        spend_mtd: 0,
+        budget: null,
+        latest_campaign: null,
+      })))
+      setLoading(false)
+      return
+    }
     ;(async () => {
       setLoading(true)
       const ids = projects.map((p) => p.id)

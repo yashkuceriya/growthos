@@ -5,7 +5,14 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
-import { Zap } from 'lucide-react'
+import { KeyRound, Zap } from 'lucide-react'
+import {
+  LOCAL_DEV_AUTH_COOKIE,
+  LOCAL_DEV_EMAIL,
+  LOCAL_DEV_PASSWORD,
+  isLocalDevAuthEnabled,
+  isLocalDevCredentials,
+} from '@/lib/local-dev-auth'
 
 function LoginForm() {
   const [email, setEmail] = useState('')
@@ -20,8 +27,20 @@ function LoginForm() {
     e.preventDefault()
     setLoading(true)
     const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) toast.error(error.message)
-    else { router.push(redirectTo); router.refresh() }
+    if (error) {
+      if (isLocalDevCredentials(email, password)) {
+        document.cookie = `${LOCAL_DEV_AUTH_COOKIE}=1; path=/; max-age=${60 * 60 * 24 * 30}; SameSite=Lax`
+        toast.success('Supabase unavailable; local workspace unlocked')
+        router.push(redirectTo)
+        router.refresh()
+      } else {
+        toast.error(error.message)
+      }
+    } else {
+      document.cookie = `${LOCAL_DEV_AUTH_COOKIE}=; path=/; max-age=0; SameSite=Lax`
+      router.push(redirectTo)
+      router.refresh()
+    }
     setLoading(false)
   }
 
@@ -83,6 +102,20 @@ function LoginForm() {
           {loading ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
+
+      {isLocalDevAuthEnabled() && (
+        <button
+          type="button"
+          onClick={() => {
+            setEmail(LOCAL_DEV_EMAIL)
+            setPassword(LOCAL_DEV_PASSWORD)
+          }}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-emerald-300 hover:bg-emerald-500/15"
+        >
+          <KeyRound className="h-4 w-4" />
+          Fill local admin
+        </button>
+      )}
 
       <p className="mt-4 text-center text-xs text-slate-400">
         No account?{' '}

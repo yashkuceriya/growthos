@@ -49,10 +49,10 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
     .maybeSingle() as { data: { id: string; project_id: string } | null }
   if (!campaign) return Response.json({ error: 'Campaign not found' }, { status: 404 })
 
-  const [adsRes, socialRes, contentRes, landingRes, leadsRes, projectEmailsRes] = await Promise.all([
+  const [adsRes, socialRes, contentRes, landingRes, projectEmailsRes] = await Promise.all([
     supabase
       .from('ad_copies')
-      .select('id, headline, primary_text, status, is_best, variant_group, variant_label, hook_framework, created_at, ad_briefs!inner(platform, campaign_id)')
+      .select('id, headline, primary_text, status, is_best, weighted_average, created_at, ad_briefs!inner(platform, campaign_id)')
       .eq('ad_briefs.campaign_id', campaignId)
       .order('created_at', { ascending: false }),
     supabase
@@ -70,12 +70,6 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
       .select('id, name, slug, template, published, visits, conversions, created_at')
       .eq('campaign_id', campaignId)
       .order('created_at', { ascending: false }),
-    supabase
-      .from('leads')
-      .select('id, email, name, status, score, utm_source, utm_medium, utm_campaign, created_at')
-      .eq('campaign_id', campaignId)
-      .order('created_at', { ascending: false })
-      .limit(50),
     // Email templates aren't campaign-scoped today — show the most recent
     // project-wide ones as a sidecar panel.
     supabase
@@ -85,6 +79,17 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
       .order('created_at', { ascending: false })
       .limit(10),
   ])
+
+  const landingIds = ((landingRes.data ?? []) as Array<{ id: string }>).map((row) => row.id)
+  const leadsRes = landingIds.length > 0
+    ? await supabase
+        .from('leads')
+        .select('id, email, name, status, score, source, source_id, created_at')
+        .eq('project_id', campaign.project_id)
+        .order('created_at', { ascending: false })
+        .limit(50)
+    : { data: [] }
+  const landingIdSet = new Set(landingIds)
 
   const ads: UnifiedAsset[] = (adsRes.data ?? []).map((row: Record<string, unknown>) => {
     const platform = (row.ad_briefs as { platform?: string } | undefined)?.platform ?? 'meta'
@@ -99,9 +104,7 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
       href: `/ad-studio?adCopyId=${row.id}`,
       metadata: {
         is_best: row.is_best ?? false,
-        variant_group: row.variant_group ?? null,
-        variant_label: row.variant_label ?? null,
-        hook_framework: row.hook_framework ?? null,
+        weighted_average: row.weighted_average ?? null,
       },
       created_at: (row.created_at as string | null) ?? null,
     }
@@ -167,24 +170,28 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
     }
   })
 
-  const leads: UnifiedAsset[] = (leadsRes.data ?? []).map((row: Record<string, unknown>) => ({
-    id: row.id as string,
-    kind: 'lead',
-    channel: (row.utm_source as string | null) ?? 'direct',
-    title: (row.email as string | null) ?? 'Lead',
-    body: null,
-    status: (row.status as string | null) ?? 'new',
-    status_tone: leadStatusTone((row.status as string | null) ?? 'new'),
-    href: `/leads?id=${row.id}`,
-    metadata: {
-      name: row.name ?? null,
-      score: row.score ?? 0,
-      utm_source: row.utm_source ?? null,
-      utm_medium: row.utm_medium ?? null,
-      utm_campaign: row.utm_campaign ?? null,
-    },
-    created_at: (row.created_at as string | null) ?? null,
-  }))
+  const leads: UnifiedAsset[] = (leadsRes.data ?? [])
+    .filter((row: Record<string, unknown>) => !row.source_id || landingIdSet.has(row.source_id as string))
+    .map((row: Record<string, unknown>) => ({
+      id: row.id as string,
+      kind: 'lead',
+      channel: (row.source as string | null) ?? 'direct',
+      title: (row.email as string | null) ?? 'Lead',
+      body: null,
+      status: (row.status as string | null) ?? 'new',
+      status_tone: leadStatusTone((row.status as string | null) ?? 'new'),
+      href: `/leads?id=${row.id}`,
+      metadata: {
+        name: row.name ?? null,
+        score: row.score ?? 0,
+        source: row.source ?? null,
+        utm_source: row.utm_source ?? row.source ?? null,
+        utm_medium: row.utm_medium ?? null,
+        utm_campaign: row.utm_campaign ?? null,
+        source_id: row.source_id ?? null,
+      },
+      created_at: (row.created_at as string | null) ?? null,
+    }))
 
   const projectEmails = (projectEmailsRes.data ?? []).map((row: Record<string, unknown>) => ({
     id: row.id as string,
