@@ -8,7 +8,6 @@ import { PageHeader } from '@/components/ui/page-header'
 import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { Mail, Loader2, Copy, ChevronDown, ChevronRight, Eye } from 'lucide-react'
-import { cn } from '@/lib/utils'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Email = any

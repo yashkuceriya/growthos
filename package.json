@@ -13,6 +13,7 @@
     "test:coverage": "vitest run --coverage",
     "doctor": "tsx scripts/doctor.ts",
     "smoke": "tsx scripts/smoke.ts",
+    "smoke:product": "tsx scripts/local-product-smoke.ts",
     "verify": "npm run typecheck && npm run lint && npm test && npm run build"
   },
   "dependencies": {

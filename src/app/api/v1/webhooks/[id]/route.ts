@@ -55,6 +55,7 @@ async function handleGet(request: Request) {
 
   // Strip user_id from the response — the caller already knows.
   const { user_id: _userId, ...publicFields } = endpoint
+  void _userId
   return attachRateLimitHeaders(Response.json({ endpoint: publicFields }), rl)
 }
 

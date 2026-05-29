@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useProject } from '@/hooks/use-project'
 import { createClient } from '@/lib/supabase/client'
@@ -10,7 +10,7 @@ import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import {
   Briefcase, Rocket, Palette, Target, Users, Megaphone, Mail, FileText, Search,
-  BarChart3, FlaskConical, Zap, Loader2, Calendar, ArrowRight, Sparkles,
+  BarChart3, FlaskConical, Loader2, Calendar, ArrowRight, Sparkles,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -23,17 +23,18 @@ interface BrandVoice {
 
 export default function AgencyHomePage() {
   const { activeProject } = useProject()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
+  const activeProjectId = activeProject?.id ?? null
   const [bv, setBv] = useState<BrandVoice>({})
   const [busy, setBusy] = useState<string | null>(null)
 
-  async function refresh() {
-    if (!activeProject) return
-    const { data } = await supabase.from('projects').select('brand_voice').eq('id', activeProject.id).single()
+  const refresh = useCallback(async () => {
+    if (!activeProjectId) return
+    const { data } = await supabase.from('projects').select('brand_voice').eq('id', activeProjectId).single()
     setBv(((data?.brand_voice as BrandVoice) ?? {}))
-  }
+  }, [activeProjectId, supabase])
 
-  useEffect(() => { refresh() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [activeProject?.id])
+  useEffect(() => { void refresh() }, [refresh])
 
   async function callAgent(endpoint: string, body: Record<string, unknown>, label: string) {
     if (!activeProject) return

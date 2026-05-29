@@ -9,7 +9,6 @@ import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { JsonView } from '@/components/ui/json-viewer'
 import { LayoutTemplate, FilePlus, Loader2 } from 'lucide-react'
-import { cn } from '@/lib/utils'
 
 export default function ProgrammaticSEOPage() {
   const { activeProject } = useProject()

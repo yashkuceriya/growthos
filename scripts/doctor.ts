@@ -100,7 +100,7 @@ const migrations = existsSync(migrationsDir)
 
 checks.push({
   name: 'Supabase migrations',
-  ok: migrations.length >= 26 && (migrations.at(-1)?.startsWith('026_') ?? false),
+  ok: migrations.length >= 27 && (migrations.at(-1)?.startsWith('027_') ?? false),
   detail: `${migrations.length} migration files found${migrations.at(-1) ? `, latest ${migrations.at(-1)}` : ''}`,
   required: true,
 })

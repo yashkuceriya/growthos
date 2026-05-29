@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useProject } from '@/hooks/use-project'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
@@ -13,18 +13,19 @@ import { guidelinesToMarkdown } from '@/lib/brand-book-export'
 
 export default function BrandHubPage() {
   const { activeProject } = useProject()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
+  const activeProjectId = activeProject?.id ?? null
   const [guidelines, setGuidelines] = useState<Record<string, unknown> | null>(null)
   const [generating, setGenerating] = useState(false)
 
-  async function refresh() {
-    if (!activeProject) return
-    const { data } = await supabase.from('projects').select('brand_voice').eq('id', activeProject.id).single()
+  const refresh = useCallback(async () => {
+    if (!activeProjectId) return
+    const { data } = await supabase.from('projects').select('brand_voice').eq('id', activeProjectId).single()
     const bv = (data?.brand_voice as Record<string, unknown>) ?? {}
     setGuidelines((bv.guidelines as Record<string, unknown> | undefined) ?? null)
-  }
+  }, [activeProjectId, supabase])
 
-  useEffect(() => { refresh() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [activeProject?.id])
+  useEffect(() => { void refresh() }, [refresh])
 
   function download() {
     if (!activeProject || !guidelines) return

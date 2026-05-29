@@ -7,7 +7,7 @@ import { PageShell } from '@/components/ui/page-shell'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
-import { Rocket, Loader2, Copy, ChevronDown, ChevronRight } from 'lucide-react'
+import { Rocket, Loader2, Copy } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 type Kit = 'master_plan' | 'product_hunt' | 'show_hn' | 'indie_hackers' | 'betalist'
@@ -165,21 +165,21 @@ function KitResult({ kit, result, onCopy }: { kit: Kit; result: any; onCopy: (s:
             <div className="mb-2">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">Real (what matters)</div>
               <ul className="text-xs text-slate-200 space-y-0.5">
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                { }
                 {result.success_metrics?.real?.map((m: string, i: number) => <li key={i}>· {m}</li>)}
               </ul>
             </div>
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Vanity (noise)</div>
               <ul className="text-xs text-slate-400 space-y-0.5">
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                { }
                 {result.success_metrics?.vanity?.map((m: string, i: number) => <li key={i}>· {m}</li>)}
               </ul>
             </div>
           </SectionPanel>
           <SectionPanel title="Pitfalls to Avoid" className="border-rose-500/20">
             <ul className="text-xs text-rose-200 space-y-0.5">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              { }
               {result.common_pitfalls?.map((p: string, i: number) => <li key={i}>⚠ {p}</li>)}
             </ul>
           </SectionPanel>
@@ -195,7 +195,7 @@ function KitResult({ kit, result, onCopy }: { kit: Kit; result: any; onCopy: (s:
           <div className="mb-3">
             <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-2">5 Tagline Options</div>
             <ul className="space-y-1">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              { }
               {result.taglines?.map((t: string, i: number) => (
                 <li key={i} className="flex items-center justify-between rounded-md border border-slate-800 bg-slate-800/40 px-3 py-2">
                   <span className="text-sm text-slate-100">&ldquo;{t}&rdquo;</span>
@@ -234,7 +234,7 @@ function KitResult({ kit, result, onCopy }: { kit: Kit; result: any; onCopy: (s:
         <div className="grid grid-cols-2 gap-4">
           <SectionPanel title="Pre-Launch Checklist">
             <ul className="space-y-1 text-xs">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              { }
               {result.pre_launch_checklist?.map((t: string, i: number) => <li key={i} className="flex gap-2 text-slate-200">☐ {t}</li>)}
             </ul>
           </SectionPanel>
@@ -302,7 +302,7 @@ function KitResult({ kit, result, onCopy }: { kit: Kit; result: any; onCopy: (s:
 
         <SectionPanel title="Technical Talking Points">
           <ul className="text-xs text-slate-200 space-y-0.5">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            { }
             {result.technical_details?.map((t: string, i: number) => <li key={i}>· {t}</li>)}
           </ul>
         </SectionPanel>
@@ -322,13 +322,13 @@ function KitResult({ kit, result, onCopy }: { kit: Kit; result: any; onCopy: (s:
         <div className="grid grid-cols-2 gap-4">
           <SectionPanel title="Toxic Patterns to Avoid" className="border-rose-500/20">
             <ul className="text-xs text-rose-200 space-y-0.5">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              { }
               {result.toxic_patterns_to_avoid?.map((p: string, i: number) => <li key={i}>⚠ {p}</li>)}
             </ul>
           </SectionPanel>
           <SectionPanel title="Watch For (success signals)">
             <ul className="text-xs text-emerald-200 space-y-0.5">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              { }
               {result.success_signals?.map((s: string, i: number) => <li key={i}>✓ {s}</li>)}
             </ul>
           </SectionPanel>
@@ -412,7 +412,7 @@ function KitResult({ kit, result, onCopy }: { kit: Kit; result: any; onCopy: (s:
           <div className="mt-3">
             <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">Key Features</div>
             <ul className="text-xs text-slate-200 space-y-0.5">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              { }
               {result.key_features?.map((f: string, i: number) => <li key={i}>· {f}</li>)}
             </ul>
           </div>
@@ -423,7 +423,7 @@ function KitResult({ kit, result, onCopy }: { kit: Kit; result: any; onCopy: (s:
 
         <SectionPanel title="Submission Tips">
           <ul className="text-xs text-slate-200 space-y-0.5">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            { }
             {result.submission_tips?.map((t: string, i: number) => <li key={i}>· {t}</li>)}
           </ul>
         </SectionPanel>

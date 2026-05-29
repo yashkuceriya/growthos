@@ -136,7 +136,7 @@ function ResultPanel({ tool, result }: { tool: Tool; result: any }) {
           <div className="mb-4 rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3">
             <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">Quick Wins</div>
             <ol className="list-decimal list-inside text-xs text-slate-200 space-y-0.5">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              { }
               {result.quick_wins.map((q: string, i: number) => <li key={i}>{q}</li>)}
             </ol>
           </div>
@@ -251,7 +251,7 @@ function ResultPanel({ tool, result }: { tool: Tool; result: any }) {
         <div className="mb-4 rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">Top 3 Fixes</div>
           <ol className="list-decimal list-inside text-sm text-slate-200 space-y-1">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            { }
             {result.top_3_fixes?.map((f: string, i: number) => <li key={i}>{f}</li>)}
           </ol>
         </div>

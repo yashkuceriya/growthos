@@ -10,10 +10,14 @@ function makeSupabase(opts: {
   rpcError?: { message: string }
 }) {
   return {
-    rpc: async (_fn: string, _args: Record<string, unknown>) => ({
-      data: opts.rpcReturns ?? null,
-      error: opts.rpcError ?? null,
-    }),
+    rpc: async (fn: string, args: Record<string, unknown>) => {
+      void fn
+      void args
+      return {
+        data: opts.rpcReturns ?? null,
+        error: opts.rpcError ?? null,
+      }
+    },
   }
 }
 

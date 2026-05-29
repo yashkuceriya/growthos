@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useProject } from '@/hooks/use-project'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
@@ -12,19 +12,20 @@ import { Search, Loader2, Plus, Trash2 } from 'lucide-react'
 
 export default function CompetitiveIntelPage() {
   const { activeProject } = useProject()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
+  const activeProjectId = activeProject?.id ?? null
   const [intel, setIntel] = useState<Record<string, unknown> | null>(null)
   const [running, setRunning] = useState(false)
   const [urls, setUrls] = useState<string[]>([''])
 
-  async function refresh() {
-    if (!activeProject) return
-    const { data } = await supabase.from('projects').select('brand_voice').eq('id', activeProject.id).single()
+  const refresh = useCallback(async () => {
+    if (!activeProjectId) return
+    const { data } = await supabase.from('projects').select('brand_voice').eq('id', activeProjectId).single()
     const bv = (data?.brand_voice as Record<string, unknown>) ?? {}
     setIntel((bv.competitive_intel as Record<string, unknown> | undefined) ?? null)
-  }
+  }, [activeProjectId, supabase])
 
-  useEffect(() => { refresh() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [activeProject?.id])
+  useEffect(() => { void refresh() }, [refresh])
 
   async function runAnalysis() {
     if (!activeProject) return

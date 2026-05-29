@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useProject } from '@/hooks/use-project'
@@ -25,12 +25,12 @@ interface ProductRow {
 }
 
 export default function DailyBriefPage() {
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const { projects, setActiveProjectId } = useProject()
   const [rows, setRows] = useState<ProductRow[]>([])
   const [loading, setLoading] = useState(true)
 
-  async function load() {
+  const load = useCallback(async () => {
     if (projects.length === 0) { setLoading(false); return }
     setLoading(true)
     const ids = projects.map((p) => p.id)
@@ -88,9 +88,12 @@ export default function DailyBriefPage() {
     })
     setRows(mapped)
     setLoading(false)
-  }
+  }, [projects, supabase])
 
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projects.length])
+  useEffect(() => {
+    const timeout = window.setTimeout(() => { void load() }, 0)
+    return () => window.clearTimeout(timeout)
+  }, [load])
 
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
 

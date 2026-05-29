@@ -16,11 +16,11 @@ vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: () => ({
     from: (table: string) => {
       if (table !== 'api_keys') throw new Error(`unexpected table: ${table}`)
-      let pendingId: string | undefined
       const proxy: Record<string, unknown> = {}
       proxy.select = () => proxy
       proxy.eq = (col: string, val: string) => {
-        if (col === 'id') pendingId = val
+        void col
+        void val
         return proxy
       }
       proxy.maybeSingle = async () => ({ data: keyRow, error: null })

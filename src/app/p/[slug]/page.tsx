@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 import { createServiceClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import { createLeadCaptureToken } from '@/lib/leads/capture-token'

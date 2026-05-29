@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useProject } from '@/hooks/use-project'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
@@ -22,7 +22,8 @@ const PIE = ['#34d399', '#059669', '#06b6d4', '#f59e0b', '#f43f5e', '#8b5cf6', '
 
 export default function BudgetPage() {
   const { activeProject } = useProject()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
+  const [timeAnchor] = useState(() => Date.now())
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [allocations, setAllocations] = useState<BudgetAllocation[]>([])
@@ -48,9 +49,7 @@ export default function BudgetPage() {
   const [eDate, setEDate] = useState('')
   const [eCreating, setECreating] = useState(false)
 
-  useEffect(() => { if (activeProject) fetchAll() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [activeProject?.id])
-
-  async function fetchAll() {
+  const fetchAll = useCallback(async () => {
     if (!activeProject) return
     setLoading(true)
     const { data: campData } = await supabase.from('campaigns').select('id, name').eq('project_id', activeProject.id).order('created_at', { ascending: false })
@@ -95,7 +94,13 @@ export default function BudgetPage() {
     setAiBudgetDraft(cap != null ? String(cap) : '')
 
     setLoading(false)
-  }
+  }, [activeProject, supabase])
+
+  useEffect(() => {
+    if (!activeProject) return
+    const timeout = window.setTimeout(() => { void fetchAll() }, 0)
+    return () => window.clearTimeout(timeout)
+  }, [activeProject, fetchAll])
 
   async function saveAiBudget(e: React.FormEvent) {
     e.preventDefault()
@@ -120,8 +125,8 @@ export default function BudgetPage() {
 
   // Month-to-date spend (matches server-side project_month_ai_spend function)
   const monthStart = useMemo(() => {
-    const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d.getTime()
-  }, [])
+    const d = new Date(timeAnchor); d.setDate(1); d.setHours(0, 0, 0, 0); return d.getTime()
+  }, [timeAnchor])
   const aiTotalMtd = useMemo(() =>
     aiCosts.filter((r) => new Date(r.created_at).getTime() >= monthStart).reduce((s, r) => s + (r.cost_usd ?? 0), 0),
     [aiCosts, monthStart],
@@ -129,9 +134,9 @@ export default function BudgetPage() {
   const budgetPercent = aiBudget ? Math.min(100, (aiTotalMtd / aiBudget) * 100) : 0
   const aiTotal30d = useMemo(() => aiCosts.reduce((s, r) => s + (r.cost_usd ?? 0), 0), [aiCosts])
   const aiTotal7d = useMemo(() => {
-    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+    const sevenDaysAgo = timeAnchor - 7 * 24 * 60 * 60 * 1000
     return aiCosts.filter((r) => new Date(r.created_at).getTime() >= sevenDaysAgo).reduce((s, r) => s + (r.cost_usd ?? 0), 0)
-  }, [aiCosts])
+  }, [aiCosts, timeAnchor])
   const aiByModule = useMemo(() => {
     const m: Record<string, number> = {}
     aiCosts.forEach((r) => { m[r.module] = (m[r.module] ?? 0) + (r.cost_usd ?? 0) })

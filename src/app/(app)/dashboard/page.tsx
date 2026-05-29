@@ -44,6 +44,7 @@ function relativeTime(iso: string): string {
 
 export default function DashboardPage() {
   const { activeProject, projects, loading } = useProject()
+  const activeProjectId = activeProject?.id ?? null
   const router = useRouter()
   const [kpi, setKpi] = useState<KpiData | null>(null)
   const [activity, setActivity] = useState<DashboardActivity[]>([])
@@ -54,9 +55,9 @@ export default function DashboardPage() {
   const [healthLoading, setHealthLoading] = useState(true)
 
   useEffect(() => {
-    if (!activeProject) return
+    if (!activeProjectId) return
     const ctrl = new AbortController()
-    fetch(`/api/dashboard/health?project_id=${activeProject.id}`, { signal: ctrl.signal })
+    fetch(`/api/dashboard/health?project_id=${activeProjectId}`, { signal: ctrl.signal })
       .then((r) => r.json())
       .then((j) => {
         setKpi(j.kpi)
@@ -67,7 +68,7 @@ export default function DashboardPage() {
       })
       .catch(() => setHealthLoading(false))
     return () => ctrl.abort()
-  }, [activeProject?.id])
+  }, [activeProjectId])
 
   if (loading) {
     return (

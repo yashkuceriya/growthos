@@ -147,7 +147,7 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
         <div className="mt-4 rounded-md border border-slate-800 bg-slate-800/40 p-3">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Deliverability Checklist</div>
           <ul className="list-disc list-inside text-xs text-slate-300 space-y-0.5">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            { }
             {result.deliverability_checklist?.map((c: string, i: number) => <li key={i}>{c}</li>)}
           </ul>
         </div>
@@ -186,7 +186,7 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
         <div className="mt-4 rounded-md border border-emerald-500/20 bg-emerald-500/5 p-3">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">Between-Step Engagement</div>
           <ul className="list-disc list-inside text-xs text-slate-200 space-y-0.5">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            { }
             {result.engagement_tips?.map((t: string, i: number) => <li key={i}>{t}</li>)}
           </ul>
         </div>
@@ -211,14 +211,14 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
             <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400">Where We Win</div>
               <ul className="mt-1 text-xs text-slate-200 space-y-0.5">
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                { }
                 {result.our_strengths_vs_them?.map((s: string, i: number) => <li key={i}>· {s}</li>)}
               </ul>
             </div>
             <div className="rounded-md border border-rose-500/30 bg-rose-500/5 p-3">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-rose-400">Where They Win</div>
               <ul className="mt-1 text-xs text-slate-200 space-y-0.5">
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                { }
                 {result.our_weaknesses_vs_them?.map((s: string, i: number) => <li key={i}>· {s}</li>)}
               </ul>
             </div>
@@ -259,13 +259,13 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
         <div className="grid grid-cols-2 gap-3">
           <SectionPanel title="Go-To Segments (We Crush)">
             <ul className="text-xs text-emerald-200 space-y-0.5">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              { }
               {result.land_grab_segments?.map((s: string, i: number) => <li key={i}>· {s}</li>)}
             </ul>
           </SectionPanel>
           <SectionPanel title="Avoid Segments (They Win)">
             <ul className="text-xs text-rose-200 space-y-0.5">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              { }
               {result.avoid_segments?.map((s: string, i: number) => <li key={i}>· {s}</li>)}
             </ul>
           </SectionPanel>
@@ -273,7 +273,7 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
 
         <SectionPanel title="Discovery Traps (Questions That Expose Them)">
           <ul className="text-sm text-slate-200 space-y-2">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            { }
             {result.traps_to_set?.map((t: string, i: number) => <li key={i} className="rounded-md border border-slate-800 bg-slate-800/40 px-3 py-2">{t}</li>)}
           </ul>
         </SectionPanel>
@@ -324,7 +324,7 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
             <div className="mb-3">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">Questions</div>
               <ol className="list-decimal list-inside text-sm text-slate-200 space-y-1">
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                { }
                 {s.questions?.map((q: string, j: number) => <li key={j}>{q}</li>)}
               </ol>
             </div>
@@ -332,14 +332,14 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
               <div className="rounded-md border border-emerald-500/20 bg-emerald-500/5 p-3">
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">Listen For</div>
                 <ul className="text-xs text-slate-200 space-y-0.5">
-                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                  { }
                   {s.listen_for?.map((l: string, j: number) => <li key={j}>· {l}</li>)}
                 </ul>
               </div>
               <div className="rounded-md border border-rose-500/20 bg-rose-500/5 p-3">
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-rose-400 mb-1">Red Flags</div>
                 <ul className="text-xs text-slate-200 space-y-0.5">
-                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                  { }
                   {s.red_flags?.map((r: string, j: number) => <li key={j}>· {r}</li>)}
                 </ul>
               </div>
@@ -352,7 +352,7 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
           <div className="mb-3">
             <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">Next Steps Options</div>
             <ul className="text-sm text-slate-200 space-y-1">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              { }
               {result.closing?.next_steps_options?.map((n: string, i: number) => <li key={i}>· {n}</li>)}
             </ul>
           </div>
@@ -394,7 +394,7 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
           <div className="mb-3">
             <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">Pre-Demo Questions (send async)</div>
             <ul className="text-sm text-slate-200 space-y-1">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              { }
               {result.pre_demo_questions?.map((q: string, i: number) => <li key={i}>· {q}</li>)}
             </ul>
           </div>
@@ -445,7 +445,7 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
             <p className="text-sm text-slate-100 italic">&ldquo;{result.closing?.commitment_ask}&rdquo;</p>
           </div>
           <ul className="text-sm text-slate-200 space-y-1">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            { }
             {result.closing?.next_step_options?.map((n: string, i: number) => <li key={i}>· {n}</li>)}
           </ul>
         </SectionPanel>
@@ -500,7 +500,7 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
 
         <SectionPanel title="Assumptions">
           <ul className="list-disc list-inside text-xs text-slate-300 space-y-0.5">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            { }
             {result.assumptions?.map((a: string, i: number) => <li key={i}>{a}</li>)}
           </ul>
         </SectionPanel>
@@ -565,13 +565,13 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
         <div className="grid grid-cols-2 gap-3">
           <SectionPanel title="Buying Triggers">
             <ul className="text-xs text-slate-200 space-y-0.5">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              { }
               {result.buying_triggers?.map((t: string, i: number) => <li key={i}>· {t}</li>)}
             </ul>
           </SectionPanel>
           <SectionPanel title="Disqualifiers">
             <ul className="text-xs text-rose-200 space-y-0.5">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              { }
               {result.disqualifiers?.map((d: string, i: number) => <li key={i}>· {d}</li>)}
             </ul>
           </SectionPanel>
@@ -579,14 +579,14 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
 
         <SectionPanel title="Watering Holes (Where They Spend Attention)">
           <div className="flex flex-wrap gap-1.5">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            { }
             {result.watering_holes?.map((w: string, i: number) => <StatusPill key={i} tone="info">{w}</StatusPill>)}
           </div>
         </SectionPanel>
 
         <SectionPanel title="Top 3 Messaging Angles">
           <ol className="list-decimal list-inside text-sm text-slate-200 space-y-1">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            { }
             {result.ideal_messaging_angles?.map((a: string, i: number) => <li key={i}>{a}</li>)}
           </ol>
         </SectionPanel>

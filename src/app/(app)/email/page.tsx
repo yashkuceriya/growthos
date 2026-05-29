@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useProject } from '@/hooks/use-project'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
@@ -21,7 +21,7 @@ type Tab = 'templates' | 'lists' | 'sequences'
 
 export default function EmailPage() {
   const { activeProject } = useProject()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
 
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [lists, setLists] = useState<EmailList[]>([])
@@ -53,9 +53,7 @@ export default function EmailPage() {
 
   const [previewHtml, setPreviewHtml] = useState<string | null>(null)
 
-  useEffect(() => { if (activeProject) fetchAll() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [activeProject?.id])
-
-  async function fetchAll() {
+  const fetchAll = useCallback(async () => {
     if (!activeProject) return
     setLoading(true)
     const [t, l, s] = await Promise.all([
@@ -102,7 +100,13 @@ export default function EmailPage() {
     }
 
     setLoading(false)
-  }
+  }, [activeProject, supabase])
+
+  useEffect(() => {
+    if (!activeProject) return
+    const timeout = window.setTimeout(() => { void fetchAll() }, 0)
+    return () => window.clearTimeout(timeout)
+  }, [activeProject, fetchAll])
 
   async function createTemplate(e: React.FormEvent) {
     e.preventDefault()

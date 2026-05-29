@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useProject } from '@/hooks/use-project'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
@@ -19,7 +19,7 @@ interface LandingPage {
 
 export default function LandingPagesPage() {
   const { activeProject } = useProject()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const [pages, setPages] = useState<LandingPage[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -32,9 +32,7 @@ export default function LandingPagesPage() {
   const [ctaText, setCtaText] = useState('Get Started Free')
   const [creating, setCreating] = useState(false)
 
-  useEffect(() => { if (activeProject) fetchPages() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [activeProject?.id])
-
-  async function fetchPages() {
+  const fetchPages = useCallback(async () => {
     if (!activeProject) return
     setLoading(true)
     const { data } = await supabase
@@ -44,7 +42,13 @@ export default function LandingPagesPage() {
       .order('created_at', { ascending: false })
     setPages((data as LandingPage[]) ?? [])
     setLoading(false)
-  }
+  }, [activeProject, supabase])
+
+  useEffect(() => {
+    if (!activeProject) return
+    const timeout = window.setTimeout(() => { void fetchPages() }, 0)
+    return () => window.clearTimeout(timeout)
+  }, [activeProject, fetchPages])
 
   async function createPage(e: React.FormEvent) {
     e.preventDefault()

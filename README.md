@@ -26,6 +26,8 @@ Open [http://localhost:3000](http://localhost:3000) with your browser.
 - `npm test` runs the Vitest unit suite.
 - `npm run build` checks the production Next build.
 - `npm run smoke` checks live Supabase/API wiring against `NEXT_PUBLIC_APP_URL`.
+- `npm run smoke:product` checks the local admin login, seeded workspace, seeded
+  campaign, and core dashboard data against localhost + Supabase.
 
 ## Local Robustness Notes
 
@@ -33,19 +35,24 @@ Open [http://localhost:3000](http://localhost:3000) with your browser.
   changing App Router conventions; Next 16 renamed middleware to `proxy.ts`.
 - `src/proxy.ts` refreshes Supabase auth cookies before route rendering. If auth
   starts behaving strangely, run `npm run doctor` first.
-- Supabase migrations live in `supabase/migrations`. The smoke test can detect
-  stale PostgREST schema cache/RPC issues after migrations.
+- Supabase migrations live in `supabase/migrations`. If a restore only brings
+  back core product tables, rerun/paste `027_restore_api_surface.sql`; it
+  recreates the API key, webhook, queue, idempotency, and rate-limit surface.
+- The local admin is `local@growthos.dev` / `GrowthOS-local-2026!`. In
+  development only, the login page can also unlock a fallback local workspace if
+  Supabase auth is unavailable.
 - Optional integrations should fail closed or show an in-app warning; local use
   should not require Resend, social publishing, screenshots, or video providers.
 
 ## Robustness Plan
 
-1. Keep `npm run doctor`, `npm run typecheck`, `npm run lint`, and `npm test`
-   green before feature work.
+1. Keep `npm run doctor`, `npm run smoke:product`, `npm run smoke`, and
+   `npm run verify` green before feature work.
 2. Convert recurring dashboard warnings into actionable setup checklist items
    instead of hidden console errors.
-3. Add Playwright coverage for the core local flows: login, project switch,
-   dashboard health, lead capture, campaign launch plan, and API key creation.
+3. Add Playwright coverage when browser-level CI is worth the runtime cost:
+   login, project switch, dashboard health, lead capture, campaign launch plan,
+   and API key creation.
 4. Generate Supabase TypeScript types from the local database and remove the
    `any`/manual casts around database rows.
 5. Make background tick endpoints idempotent and observable from one local
@@ -54,5 +61,6 @@ Open [http://localhost:3000](http://localhost:3000) with your browser.
 
 ## Verification
 
-Run `npm run verify` for the full local gate. Run `npm run smoke` only when the
-dev server and Supabase project are both available.
+Run `npm run verify` for the full local gate. Run `npm run smoke:product` and
+`npm run smoke` only when the dev server and Supabase project are both
+available.

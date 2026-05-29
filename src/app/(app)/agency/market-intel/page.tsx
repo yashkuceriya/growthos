@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useProject } from '@/hooks/use-project'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
@@ -25,21 +25,22 @@ interface Intel {
 
 export default function MarketIntelPage() {
   const { activeProject } = useProject()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
+  const activeProjectId = activeProject?.id ?? null
   const [intel, setIntel] = useState<Intel | null>(null)
   const [running, setRunning] = useState(false)
   const [extraSubs, setExtraSubs] = useState<string[]>([''])
   const [rssFeeds, setRssFeeds] = useState<string[]>([''])
   const [sources, setSources] = useState<{ subreddits_scanned: string[]; reddit_threads_count: number; hn_stories_count: number; rss_items_count: number } | null>(null)
 
-  async function refresh() {
-    if (!activeProject) return
-    const { data } = await supabase.from('projects').select('brand_voice').eq('id', activeProject.id).single()
+  const refresh = useCallback(async () => {
+    if (!activeProjectId) return
+    const { data } = await supabase.from('projects').select('brand_voice').eq('id', activeProjectId).single()
     const bv = (data?.brand_voice as Record<string, unknown>) ?? {}
     setIntel((bv.market_intel as Intel | undefined) ?? null)
-  }
+  }, [activeProjectId, supabase])
 
-  useEffect(() => { refresh() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [activeProject?.id])
+  useEffect(() => { void refresh() }, [refresh])
 
   async function runScan() {
     if (!activeProject) return

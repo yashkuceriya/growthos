@@ -168,7 +168,7 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
 
         <SectionPanel title="Media Assets Checklist">
           <ul className="text-xs text-slate-200 space-y-0.5">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            { }
             {result.media_assets_checklist?.map((a: string, i: number) => <li key={i}>☐ {a}</li>)}
           </ul>
         </SectionPanel>
@@ -181,7 +181,7 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
             <div>
               <dt className="text-[10px] font-semibold uppercase tracking-wider text-rose-400">Avoid</dt>
               <ul className="text-slate-300 space-y-0.5 mt-1">
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                { }
                 {result.brand_guidelines_summary?.things_to_avoid?.map((t: string, i: number) => <li key={i}>· {t}</li>)}
               </ul>
             </div>
@@ -221,7 +221,7 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
           <p className="text-[10px] font-mono-data text-slate-500 mb-2">{result.dateline}</p>
           <p className="text-sm font-semibold text-slate-300 mb-3">{result.subheadline}</p>
           <p className="text-sm text-slate-100 mb-3">{result.lede_paragraph}</p>
-          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+          { }
           {result.body_paragraphs?.map((p: string, i: number) => <p key={i} className="text-sm text-slate-300 mb-2">{p}</p>)}
           <blockquote className="my-3 rounded-md border-l-2 border-emerald-500 bg-emerald-500/5 p-3 italic text-slate-100">
             &ldquo;{result.pull_quote?.quote}&rdquo;
@@ -245,7 +245,7 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
 
         <SectionPanel title="Distribution Tips">
           <ul className="text-xs text-slate-200 space-y-0.5">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            { }
             {result.distribution_tips?.map((t: string, i: number) => <li key={i}>· {t}</li>)}
           </ul>
         </SectionPanel>
@@ -288,7 +288,7 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
 
         <SectionPanel title="Key Facts (for reporter)">
           <ul className="text-xs text-slate-200 space-y-0.5">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            { }
             {result.key_facts?.map((f: string, i: number) => <li key={i}>· {f}</li>)}
           </ul>
         </SectionPanel>
@@ -318,7 +318,7 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
             <div className="mt-3">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Attach</div>
               <ul className="text-xs text-slate-200 space-y-0.5">
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                { }
                 {result.attachments_recommendations?.map((a: string, i: number) => <li key={i}>· {a}</li>)}
               </ul>
             </div>
@@ -353,7 +353,7 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
           <SectionPanel title="Audience Value Prop"><p className="text-xs text-slate-200">{result.audience_value_prop}</p></SectionPanel>
           <SectionPanel title="Credibility Markers">
             <ul className="text-xs text-slate-200 space-y-0.5">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              { }
               {result.credibility_markers?.map((c: string, i: number) => <li key={i}>· {c}</li>)}
             </ul>
           </SectionPanel>
@@ -361,7 +361,7 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
 
         <SectionPanel title="Sample Questions for the Host">
           <ol className="list-decimal list-inside text-sm text-slate-200 space-y-1">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            { }
             {result.sample_questions?.map((q: string, i: number) => <li key={i}>{q}</li>)}
           </ol>
         </SectionPanel>
@@ -378,7 +378,7 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
           <p className="text-sm font-semibold text-slate-300 mb-3">{result.talk_subtitle}</p>
           <CopyBlock label="Abstract (150 words)" text={result.abstract_150} onCopy={onCopy} />
           <div className="mt-3 grid grid-cols-3 gap-2">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            { }
             {result.takeaways?.map((t: string, i: number) => (
               <div key={i} className="rounded-md border border-emerald-500/20 bg-emerald-500/5 p-2">
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400">Takeaway {i + 1}</div>
@@ -421,7 +421,7 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
 
         <SectionPanel title="Milestones to Cite">
           <ul className="text-xs text-slate-200 space-y-0.5">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            { }
             {result.milestones_achieved?.map((m: string, i: number) => <li key={i}>· {m}</li>)}
           </ul>
         </SectionPanel>
@@ -429,13 +429,13 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
         <div className="grid grid-cols-2 gap-3">
           <SectionPanel title="Evidence to Gather">
             <ul className="text-xs text-slate-200 space-y-0.5">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              { }
               {result.supporting_evidence_needed?.map((e: string, i: number) => <li key={i}>☐ {e}</li>)}
             </ul>
           </SectionPanel>
           <SectionPanel title="Press Mentions to Cite">
             <ul className="text-xs text-slate-200 space-y-0.5">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              { }
               {result.press_mentions_to_cite?.map((p: string, i: number) => <li key={i}>· {p}</li>)}
             </ul>
           </SectionPanel>
@@ -443,7 +443,7 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
 
         <SectionPanel title="Testimonials to Request">
           <ul className="text-xs text-slate-200 space-y-0.5">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            { }
             {result.customer_testimonials_to_request?.map((t: string, i: number) => <li key={i}>→ {t}</li>)}
           </ul>
         </SectionPanel>
@@ -505,13 +505,13 @@ function ResultPanel({ tool, result, onCopy }: { tool: Tool; result: any; onCopy
         <div className="grid grid-cols-2 gap-3">
           <SectionPanel title="Red Flags (don't newsjack)" className="border-rose-500/20">
             <ul className="text-xs text-rose-200 space-y-0.5">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              { }
               {result.red_flags?.map((r: string, i: number) => <li key={i}>⚠ {r}</li>)}
             </ul>
           </SectionPanel>
           <SectionPanel title="Google Alerts Watchlist">
             <ul className="text-xs text-slate-200 space-y-0.5">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              { }
               {result.current_watchlist?.map((w: string, i: number) => <li key={i}>· {w}</li>)}
             </ul>
           </SectionPanel>
