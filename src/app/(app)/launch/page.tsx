@@ -15,6 +15,8 @@ import {
 } from 'lucide-react'
 // Search icon used in SEO panel; keep explicit import above.
 import { cn } from '@/lib/utils'
+import { QualityVerdict } from '@/components/marketing/quality-verdict'
+import type { GeneratedQualityScore } from '@/lib/marketing/quality'
 
 type ChannelKey = 'meta' | 'linkedin' | 'tiktok' | 'twitter' | 'reddit' | 'email' | 'blog' | 'landing'
 type ChannelStatus = 'pending' | 'generating' | 'ready' | 'failed'
@@ -53,6 +55,7 @@ interface Asset {
   body: string
   url?: string
   metadata?: Record<string, unknown>
+  quality?: GeneratedQualityScore | null
 }
 
 interface LaunchChannelRec {
@@ -158,31 +161,31 @@ export default function LaunchPage() {
     const [ads, social, emailSeq, content, landing] = await Promise.all([
       supabase.from('ad_copies').select('id, headline, primary_text, cta_button, metadata, ad_briefs!inner(platform, project_id)').eq('ad_briefs.project_id', projectId).eq('metadata->>launch_run', 'true').order('created_at', { ascending: false }).limit(20),
       supabase.from('social_posts').select('id, platform, content, metadata').eq('project_id', projectId).eq('metadata->>launch_run', 'true').order('created_at', { ascending: false }).limit(30),
-      supabase.from('email_templates').select('id, subject, body_html').eq('project_id', projectId).eq('category', 'welcome').order('created_at', { ascending: false }).limit(10),
-      supabase.from('content_pieces').select('id, title, body_markdown').eq('project_id', projectId).eq('metadata->>launch_run', 'true').order('created_at', { ascending: false }).limit(5),
-      supabase.from('landing_pages').select('id, name, slug, template').eq('project_id', projectId).order('created_at', { ascending: false }).limit(3),
+      supabase.from('email_templates').select('id, subject, body_html, metadata').eq('project_id', projectId).eq('category', 'welcome').order('created_at', { ascending: false }).limit(10),
+      supabase.from('content_pieces').select('id, title, body_markdown, metadata').eq('project_id', projectId).eq('metadata->>launch_run', 'true').order('created_at', { ascending: false }).limit(5),
+      supabase.from('landing_pages').select('id, name, slug, template, metadata').eq('project_id', projectId).order('created_at', { ascending: false }).limit(3),
     ])
 
     const next: Record<ChannelKey, Asset[]> = Object.fromEntries(CHANNELS.map((c) => [c.key, []])) as unknown as Record<ChannelKey, Asset[]>
 
     ;(ads.data ?? []).forEach((a: Record<string, unknown>) => {
       const platform = (a.ad_briefs as { platform: string } | undefined)?.platform
-      if (platform === 'meta') next.meta.push({ kind: 'ad', title: a.headline as string ?? 'Meta ad', body: `${a.primary_text}\n\nCTA: ${a.cta_button}`, metadata: a })
-      if (platform === 'linkedin') next.linkedin.push({ kind: 'ad', title: a.headline as string ?? 'LinkedIn ad', body: a.primary_text as string, metadata: a })
+      if (platform === 'meta') next.meta.push({ kind: 'ad', title: a.headline as string ?? 'Meta ad', body: `${a.primary_text}\n\nCTA: ${a.cta_button}`, metadata: a, quality: readAssetQuality(a) })
+      if (platform === 'linkedin') next.linkedin.push({ kind: 'ad', title: a.headline as string ?? 'LinkedIn ad', body: a.primary_text as string, metadata: a, quality: readAssetQuality(a) })
     })
     ;(social.data ?? []).forEach((s: Record<string, unknown>) => {
       const platform = s.platform as ChannelKey
-      if (next[platform]) next[platform].push({ kind: platform, title: (s.metadata as Record<string, unknown>)?.title as string ?? `${platform} post`, body: s.content as string, metadata: s })
+      if (next[platform]) next[platform].push({ kind: platform, title: (s.metadata as Record<string, unknown>)?.title as string ?? `${platform} post`, body: s.content as string, metadata: s, quality: readAssetQuality(s) })
     })
     ;(emailSeq.data ?? []).forEach((e: Record<string, unknown>) => {
-      next.email.push({ kind: 'email', title: e.subject as string, body: e.body_html as string, metadata: e })
+      next.email.push({ kind: 'email', title: e.subject as string, body: e.body_html as string, metadata: e, quality: readAssetQuality(e) })
     })
     ;(content.data ?? []).forEach((c: Record<string, unknown>) => {
-      next.blog.push({ kind: 'blog', title: c.title as string, body: c.body_markdown as string, url: `/content?id=${c.id}`, metadata: c })
+      next.blog.push({ kind: 'blog', title: c.title as string, body: c.body_markdown as string, url: `/content?id=${c.id}`, metadata: c, quality: readAssetQuality(c) })
     })
     ;(landing.data ?? []).forEach((l: Record<string, unknown>) => {
       const t = l.template as { headline?: string } ?? {}
-      next.landing.push({ kind: 'landing', title: t.headline ?? l.name as string, body: `Slug: /p/${l.slug}`, url: `/p/${l.slug}`, metadata: l })
+      next.landing.push({ kind: 'landing', title: t.headline ?? l.name as string, body: `Slug: /p/${l.slug}`, url: `/p/${l.slug}`, metadata: l, quality: readAssetQuality(l) })
     })
 
     setAssets(next)
@@ -911,6 +914,16 @@ function StatusIndicator({ state, hasAssets }: { state: ChannelState; hasAssets:
   return <span className="h-4 w-4 rounded-full border border-slate-700" />
 }
 
+function readAssetQuality(row: Record<string, unknown>): GeneratedQualityScore | null {
+  const metadata = row.metadata
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null
+  const quality = (metadata as Record<string, unknown>).quality
+  if (!quality || typeof quality !== 'object' || Array.isArray(quality)) return null
+  const overall = (quality as Record<string, unknown>).overall
+  if (typeof overall !== 'number') return null
+  return quality as GeneratedQualityScore
+}
+
 function ChannelDrawer({
   channel, assets, onClose, onCopy,
 }: { channel: Channel; assets: Asset[]; onClose: () => void; onCopy: (text: string) => void }) {
@@ -963,6 +976,7 @@ function ChannelDrawer({
           {asset ? (
             <div className="space-y-4">
               <h3 className="text-lg font-semibold text-slate-100">{asset.title}</h3>
+              <QualityVerdict quality={asset.quality} />
               <div className="rounded-md border border-slate-800 bg-slate-950 p-4">
                 {channel.key === 'email' ? (
                   <div className="prose prose-invert prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: asset.body }} />

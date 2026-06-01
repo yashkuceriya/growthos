@@ -17,6 +17,8 @@ import { mergeBrandVoice } from '@/lib/brand-voice'
 import { checkBudget, budgetExceededResponse } from '@/lib/budget-guard'
 import { isLaunchChannel, LAUNCH_CHANNELS } from '@/lib/launch/plan'
 import { learningSummaryToPrompt } from '@/lib/campaigns/learning'
+import { scoreGeneratedAsset } from '@/lib/marketing/quality'
+import type { MarketingMemory } from '@/lib/marketing/memory'
 
 // Channel ids the UI renders — must match keys below
 const ALL_CHANNELS = LAUNCH_CHANNELS
@@ -388,6 +390,7 @@ async function runChannel(
   track: TrackOpts,
 ): Promise<string> {
   const brandContext = brandContextFromCtx(ctx)
+  const qualityMemory = marketingMemoryFromLaunchContext(projectId, ctx)
 
   switch (channel) {
     case 'meta': {
@@ -401,13 +404,20 @@ async function runChannel(
       const LABELS = ['A', 'B', 'C']
       if (brief) {
         for (const [idx, ad] of variants.entries()) {
+          const quality = scoreGeneratedAsset('ad_copy', {
+            headline: ad.headline,
+            body: ad.primary_text,
+            cta: ad.cta_button,
+          }, qualityMemory)
           const { data: adCopy } = await supabase.from('ad_copies').insert({
             user_id: userId, brief_id: brief.id, iteration_number: 1,
             primary_text: ad.primary_text, headline: ad.headline,
             description: ad.description, cta_button: ad.cta_button,
             status: 'evaluator_pass',
             variant_group: variantGroup, variant_label: LABELS[idx], hook_framework: ad.hook_framework,
-            metadata: { launch_run: true, image_prompt: ad.image_prompt, hook_framework: ad.hook_framework },
+            weighted_average: quality.overall,
+            evaluation_scores: quality.dimensions,
+            metadata: { launch_run: true, image_prompt: ad.image_prompt, hook_framework: ad.hook_framework, quality },
           }).select().single()
           if (adCopy && idx === 0) {
             // Image only for variant A — variants test copy, not creative. User can regen for B/C.
@@ -433,12 +443,18 @@ async function runChannel(
       const LABELS = ['A', 'B', 'C']
       if (brief) {
         for (const [idx, v] of assets.variants.entries()) {
+          const quality = scoreGeneratedAsset('ad_copy', {
+            headline: v.headline,
+            body: v.text,
+          }, qualityMemory)
           const { data: adCopy } = await supabase.from('ad_copies').insert({
             user_id: userId, brief_id: brief.id, iteration_number: 1,
             primary_text: v.text, headline: v.headline,
             status: 'evaluator_pass',
             variant_group: variantGroup, variant_label: LABELS[idx], hook_framework: v.hook_framework,
-            metadata: { launch_run: true, image_prompt: v.image_prompt, hook_framework: v.hook_framework, organic_posts: assets.organic_posts },
+            weighted_average: quality.overall,
+            evaluation_scores: quality.dimensions,
+            metadata: { launch_run: true, image_prompt: v.image_prompt, hook_framework: v.hook_framework, organic_posts: assets.organic_posts, quality },
           }).select().single()
           if (adCopy && idx === 0) {
             await generateAdImagesForCopy({
@@ -453,11 +469,16 @@ async function runChannel(
       // Organic posts go to social_posts with the campaign_id so the
       // Campaign Command Center can aggregate them by campaign.
       for (const p of assets.organic_posts) {
+        const content = `${p.text}\n\n${p.hashtags.map((h) => `#${h}`).join(' ')}`
+        const quality = scoreGeneratedAsset('social_post', {
+          body: content,
+          hashtags: p.hashtags,
+        }, qualityMemory)
         await supabase.from('social_posts').insert({
           user_id: userId, project_id: projectId, campaign_id: campaignId, platform: 'linkedin',
-          content: `${p.text}\n\n${p.hashtags.map((h) => `#${h}`).join(' ')}`,
+          content,
           status: 'draft', ai_generated: true,
-          metadata: { launch_run: true },
+          metadata: { launch_run: true, quality },
         })
       }
       return `3 LinkedIn variants (${assets.variants.map((v) => v.hook_framework).join(' / ')}) + ${assets.organic_posts.length} organic posts`
@@ -465,28 +486,41 @@ async function runChannel(
     case 'tiktok': {
       const { reels } = await withRetries(() => genTikTokAssets(ctx, track), 'tiktok')
       for (const reel of reels) {
+        const content = `HOOK: ${reel.hook}\n\nSCRIPT:\n${reel.script}\n\nCAPTION:\n${reel.caption}\n\n${reel.hashtags.map((h) => `#${h}`).join(' ')}`
+        const quality = scoreGeneratedAsset('social_post', {
+          headline: reel.hook,
+          body: content,
+          hashtags: reel.hashtags,
+        }, qualityMemory)
         await supabase.from('social_posts').insert({
           user_id: userId, project_id: projectId, campaign_id: campaignId, platform: 'tiktok',
-          content: `HOOK: ${reel.hook}\n\nSCRIPT:\n${reel.script}\n\nCAPTION:\n${reel.caption}\n\n${reel.hashtags.map((h) => `#${h}`).join(' ')}`,
+          content,
           status: 'draft', ai_generated: true,
-          metadata: { launch_run: true, thumbnail_prompt: reel.thumbnail_prompt },
+          metadata: { launch_run: true, thumbnail_prompt: reel.thumbnail_prompt, quality },
         })
       }
       return `${reels.length} reels. Top hooks: ${reels.map((r) => r.hook).join(' | ')}`
     }
     case 'twitter': {
       const thread = await withRetries(() => genTwitterThread(ctx, track), 'twitter')
+      const threadContent = thread.thread.sort((a, b) => a.position - b.position).map((t, i) => `[${i + 1}/${thread.thread.length}] ${t.text}`).join('\n\n')
+      const threadQuality = scoreGeneratedAsset('social_post', {
+        body: threadContent,
+      }, qualityMemory)
       await supabase.from('social_posts').insert({
         user_id: userId, project_id: projectId, campaign_id: campaignId, platform: 'twitter',
-        content: thread.thread.sort((a, b) => a.position - b.position).map((t, i) => `[${i + 1}/${thread.thread.length}] ${t.text}`).join('\n\n'),
+        content: threadContent,
         status: 'draft', ai_generated: true,
-        metadata: { launch_run: true, type: 'thread' },
+        metadata: { launch_run: true, type: 'thread', quality: threadQuality },
       })
       for (const t of thread.standalone_tweets) {
+        const quality = scoreGeneratedAsset('social_post', {
+          body: t.text,
+        }, qualityMemory)
         await supabase.from('social_posts').insert({
           user_id: userId, project_id: projectId, campaign_id: campaignId, platform: 'twitter',
           content: t.text, status: 'draft', ai_generated: true,
-          metadata: { launch_run: true, image_prompt: t.image_prompt ?? null },
+          metadata: { launch_run: true, image_prompt: t.image_prompt ?? null, quality },
         })
       }
       return `Thread hook: ${thread.thread[0]?.text ?? ''}\nStandalone: ${thread.standalone_tweets.map((t) => t.text).join(' || ')}`
@@ -495,11 +529,16 @@ async function runChannel(
       const voice = await getFounderVoiceContext(userId, 'reddit').catch(() => '')
       const { posts } = await withRetries(() => genRedditPosts(ctx, voice, track), 'reddit')
       for (const p of posts) {
+        const content = `r/${p.subreddit}\n\nTITLE: ${p.title}\n\n${p.body_markdown}`
+        const quality = scoreGeneratedAsset('social_post', {
+          title: p.title,
+          body: content,
+        }, qualityMemory)
         await supabase.from('social_posts').insert({
           user_id: userId, project_id: projectId, campaign_id: campaignId, platform: 'reddit',
-          content: `r/${p.subreddit}\n\nTITLE: ${p.title}\n\n${p.body_markdown}`,
+          content,
           status: 'draft', ai_generated: true,
-          metadata: { launch_run: true, subreddit: p.subreddit, post_type: p.post_type, title: p.title },
+          metadata: { launch_run: true, subreddit: p.subreddit, post_type: p.post_type, title: p.title, quality },
         })
       }
       return `3 subreddit posts: ${posts.map((p) => `r/${p.subreddit} — "${p.title}"`).join(' | ')}`
@@ -513,13 +552,19 @@ async function runChannel(
         trigger_type: 'signup', status: 'draft',
       }).select().single()
       for (const [idx, email] of emails.entries()) {
+        const quality = scoreGeneratedAsset('email', {
+          subject: email.subject,
+          previewText: email.preview_text,
+          body: email.body_html,
+          cta: email.cta_text,
+        }, qualityMemory)
         const { data: tmpl } = await supabase.from('email_templates').insert({
           user_id: userId, project_id: projectId,
           name: `Welcome ${idx + 1}: ${email.subject.slice(0, 40)}`,
           subject: email.subject,
           body_html: email.body_html,
           category: 'welcome',
-          metadata: { preview_text: email.preview_text, cta: { text: email.cta_text, url: email.cta_url } },
+          metadata: { launch_run: true, preview_text: email.preview_text, cta: { text: email.cta_text, url: email.cta_url }, quality },
         }).select().single()
         if (seq && tmpl) {
           await supabase.from('email_sequence_steps').insert({
@@ -532,20 +577,32 @@ async function runChannel(
     }
     case 'blog': {
       const post = await withRetries(() => genBlogPost(ctx, track), 'blog')
+      const quality = scoreGeneratedAsset('blog', {
+        title: post.title,
+        body: post.body_markdown,
+        targetKeyword: post.target_keywords[0],
+      }, qualityMemory)
       await supabase.from('content_pieces').insert({
         user_id: userId, project_id: projectId, campaign_id: campaignId,
         title: post.title, slug: post.slug,
         body_markdown: post.body_markdown,
         content_type: 'blog_post', status: 'drafting',
+        seo_score: Math.round(quality.overall * 10),
         target_keywords: post.target_keywords,
         word_count: post.body_markdown.split(/\s+/).filter(Boolean).length,
-        metadata: { launch_run: true, meta_description: post.meta_description },
+        metadata: { launch_run: true, meta_description: post.meta_description, quality },
       })
       return `Blog: "${post.title}" (${post.body_markdown.split(/\s+/).length} words) targeting ${post.target_keywords.join(', ')}`
     }
     case 'landing': {
       const page = await withRetries(() => genLandingPage(ctx, track), 'landing')
       const slug = `${projectSlug}-${Date.now().toString(36).slice(-4)}`
+      const bodyText = page.body_sections.map((s) => `## ${s.heading}\n${s.content}`).join('\n\n')
+      const quality = scoreGeneratedAsset('landing_page', {
+        headline: page.headline,
+        body: bodyText,
+        cta: page.cta_text,
+      }, qualityMemory)
       await supabase.from('landing_pages').insert({
         user_id: userId, project_id: projectId, campaign_id: campaignId,
         name: `${ctx.productName} Launch Page`,
@@ -553,14 +610,72 @@ async function runChannel(
         template: {
           headline: page.headline,
           subheadline: page.subheadline,
-          bodyText: page.body_sections.map((s) => `## ${s.heading}\n${s.content}`).join('\n\n'),
+          bodyText,
           ctaText: page.cta_text,
           ctaColor: ctx.primaryColor,
         },
+        metadata: { launch_run: true, quality },
         published: true,
       })
       return `Landing: "${page.headline}" → /p/${slug}, CTA: ${page.cta_text}`
     }
   }
   return ''
+}
+
+function marketingMemoryFromLaunchContext(projectId: string, ctx: LaunchContext): MarketingMemory {
+  return {
+    project: {
+      id: projectId,
+      name: ctx.productName,
+      website: ctx.website,
+      description: null,
+    },
+    brand: {
+      tagline: ctx.tagline,
+      valueProp: ctx.valueProp,
+      audience: ctx.audience,
+      tone: ctx.tone,
+      features: ctx.features,
+      differentiators: ctx.differentiators,
+      pricing: ctx.pricing,
+      primaryColor: ctx.primaryColor,
+      heroImageUrl: ctx.heroImageUrl,
+      capturedScreenshotUrl: null,
+      designTokens: null,
+    },
+    classification: {
+      vertical: null,
+      verticalConfidence: null,
+      businessModel: null,
+      targetMarket: ctx.audience,
+      stage: null,
+      primaryGoal: null,
+      pricingTier: null,
+      icp: ctx.audience,
+      competitors: [],
+      complianceFlags: [],
+    },
+    blueprint: {
+      vertical: 'other',
+      confidence: 0,
+      icp: ctx.audience,
+      primaryGoal: 'conversion',
+      primaryKpi: 'signups',
+      primaryChannels: [],
+      secondaryChannels: [],
+      launchTactics: [],
+      croFocus: [],
+      lifecycleEmails: [],
+      contentMix: [],
+      readiness: [],
+    },
+    launchInsights: { lastUpdated: null, lastCampaignId: null, current: null, recentHistory: [] },
+    adInsights: [],
+    performance: [],
+    founderVoice: { samples: [], styleNotes: null },
+    styleReferences: [],
+    assetKind: null,
+    channel: null,
+  }
 }
