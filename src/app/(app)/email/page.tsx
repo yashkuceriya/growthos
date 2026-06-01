@@ -11,6 +11,8 @@ import { StatusPill } from '@/components/ui/status-pill'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Plus, Mail, Users, Workflow, Sparkles, Loader2, Eye, Trash2, FileText, X, Trophy } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { QualityVerdict } from '@/components/marketing/quality-verdict'
+import type { GeneratedQualityScore } from '@/lib/marketing/quality'
 
 interface EmailTemplate { id: string; name: string; subject: string; body_html: string | null; category: string | null; created_at: string; is_winner: boolean; winner_score: number | null }
 interface EmailList { id: string; name: string; description: string | null; subscriber_count: number }
@@ -36,6 +38,7 @@ export default function EmailPage() {
   const [tBody, setTBody] = useState('')
   const [tCategory, setTCategory] = useState('')
   const [tCreating, setTCreating] = useState(false)
+  const [draftQuality, setDraftQuality] = useState<GeneratedQualityScore | null>(null)
 
   const [aiOpen, setAiOpen] = useState(false)
   const [aiPurpose, setAiPurpose] = useState('')
@@ -119,7 +122,7 @@ export default function EmailPage() {
       name: tName, subject: tSubject, body_html: tBody || null, category: tCategory || null,
     })
     if (error) toast.error(error.message)
-    else { toast.success('Template created'); setTOpen(false); setTName(''); setTSubject(''); setTBody(''); setTCategory(''); fetchAll() }
+    else { toast.success('Template created'); setTOpen(false); setTName(''); setTSubject(''); setTBody(''); setTCategory(''); setDraftQuality(null); fetchAll() }
     setTCreating(false)
   }
 
@@ -134,6 +137,7 @@ export default function EmailPage() {
       })
       if (!res.ok) throw new Error('Generation failed')
       const email = await res.json()
+      setDraftQuality(email.quality ?? null)
       setTName(`AI: ${aiType} email`); setTSubject(email.subject); setTBody(email.body_html)
       setAiOpen(false); setTOpen(true); toast.success('Email generated')
     } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed') }
@@ -225,7 +229,7 @@ export default function EmailPage() {
                 </form>
               </DialogContent>
             </Dialog>
-            <Dialog open={tOpen} onOpenChange={setTOpen}>
+            <Dialog open={tOpen} onOpenChange={(open) => { setTOpen(open); if (!open) setDraftQuality(null) }}>
               <DialogTrigger>
                 <div className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-950 hover:bg-emerald-400">
                   <Plus className="h-3.5 w-3.5" /> New Template
@@ -239,6 +243,7 @@ export default function EmailPage() {
                     <input placeholder="Category" value={tCategory} onChange={(e) => setTCategory(e.target.value)} className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none" />
                   </div>
                   <input required placeholder="Subject line" value={tSubject} onChange={(e) => setTSubject(e.target.value)} className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none" />
+                  <QualityVerdict quality={draftQuality} />
                   <textarea placeholder="<h1>Welcome!</h1>…" value={tBody} onChange={(e) => setTBody(e.target.value)} rows={10} className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-mono-data text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none resize-none" />
                   <div className="flex gap-2">
                     <button type="submit" disabled={tCreating} className="flex-1 rounded-md bg-emerald-500 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-950 hover:bg-emerald-400 disabled:opacity-50">

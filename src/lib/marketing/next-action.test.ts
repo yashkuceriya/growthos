@@ -74,6 +74,17 @@ describe('nextBestAction', () => {
     expect(action.id).toBe('schedule_social')
   })
 
+  it('prompts to improve weak drafts before scheduling them', () => {
+    const action = nextBestAction({
+      hasProject: true, projectWebsite: 'https://x.com', blueprint: READY_BLUEPRINT,
+      campaignCount: 1, latestCampaignAssetCount: 6,
+      adsNeedingReview: 0, lowQualityDrafts: 2, lowQualityDraftHref: '/social', socialPostsDraft: 4,
+    })
+    expect(action.id).toBe('improve_quality')
+    expect(action.title).toContain('2 weak')
+    expect(action.href).toBe('/social')
+  })
+
   it('prompts to log metrics when nothing has been measured yet', () => {
     const action = nextBestAction({
       hasProject: true, projectWebsite: 'https://x.com', blueprint: READY_BLUEPRINT,
@@ -91,6 +102,27 @@ describe('nextBestAction', () => {
       hasMeasurements: true, hasInsights: true, hasWinners: false,
     })
     expect(action.id).toBe('promote_winner')
+  })
+
+  it('prompts to refresh learnings when metrics exist but memory has no insights', () => {
+    const action = nextBestAction({
+      hasProject: true, projectWebsite: 'https://x.com', blueprint: READY_BLUEPRINT,
+      campaignCount: 1, latestCampaignId: 'camp_1', latestCampaignAssetCount: 6,
+      hasManualMetrics: true, hasInsights: false,
+    })
+    expect(action.id).toBe('refresh_learnings')
+    expect(action.href).toBe('/campaigns/camp_1')
+  })
+
+  it('suggests doubling down on the best channel when learnings and winners exist', () => {
+    const action = nextBestAction({
+      hasProject: true, projectWebsite: 'https://x.com', blueprint: READY_BLUEPRINT,
+      campaignCount: 2, latestCampaignAssetCount: 8,
+      hasMeasurements: true, hasInsights: true, hasWinners: true,
+      bestChannel: 'linkedin',
+    })
+    expect(action.id).toBe('double_down')
+    expect(action.title).toContain('Linkedin')
   })
 
   it('falls through to a next-experiment nudge when everything is healthy', () => {

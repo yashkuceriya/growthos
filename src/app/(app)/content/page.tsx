@@ -12,6 +12,8 @@ import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Plus, FileText, Sparkles, Loader2, Trash2, Search, Check, X, ArrowLeft } from 'lucide-react'
+import { QualityVerdict } from '@/components/marketing/quality-verdict'
+import type { GeneratedQualityScore } from '@/lib/marketing/quality'
 
 interface ContentPiece {
   id: string; title: string; body_markdown: string | null; content_type: string
@@ -35,6 +37,7 @@ export default function ContentPage() {
   const [cKeywords, setCKeywords] = useState('')
   const [cBody, setCBody] = useState('')
   const [creating, setCreating] = useState(false)
+  const [draftQuality, setDraftQuality] = useState<GeneratedQualityScore | null>(null)
 
   const [aiOpen, setAiOpen] = useState(false)
   const [aiTopic, setAiTopic] = useState('')
@@ -110,7 +113,7 @@ export default function ContentPage() {
       ...(linkedCampaign ? { campaign_id: linkedCampaign.id } : {}),
     })
     if (error) toast.error(error.message)
-    else { toast.success('Content created'); setCOpen(false); setCTitle(''); setCType('blog_post'); setCKeywords(''); setCBody(''); fetchContent() }
+    else { toast.success('Content created'); setCOpen(false); setCTitle(''); setCType('blog_post'); setCKeywords(''); setCBody(''); setDraftQuality(null); fetchContent() }
     setCreating(false)
   }
 
@@ -125,6 +128,7 @@ export default function ContentPage() {
       })
       if (!res.ok) throw new Error('Generation failed')
       const post = await res.json()
+      setDraftQuality(post.quality ?? null)
       setCTitle(post.title); setCKeywords(post.target_keywords.join(', ')); setCBody(post.body_markdown)
       setAiOpen(false); setCOpen(true); toast.success('Blog post generated')
     } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed') }
@@ -246,7 +250,7 @@ export default function ContentPage() {
                 </form>
               </DialogContent>
             </Dialog>
-            <Dialog open={cOpen} onOpenChange={setCOpen}>
+            <Dialog open={cOpen} onOpenChange={(open) => { setCOpen(open); if (!open) setDraftQuality(null) }}>
               <DialogTrigger><div className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-950 hover:bg-emerald-400"><Plus className="h-3.5 w-3.5" />New Content</div></DialogTrigger>
               <DialogContent className="border-slate-700 bg-slate-900 max-w-2xl">
                 <DialogHeader><DialogTitle className="text-slate-100">Create content</DialogTitle></DialogHeader>
@@ -261,6 +265,7 @@ export default function ContentPage() {
                     </select>
                   </div>
                   <input placeholder="Keywords (comma separated)" value={cKeywords} onChange={(e) => setCKeywords(e.target.value)} className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none" />
+                  <QualityVerdict quality={draftQuality} />
                   <textarea rows={8} placeholder="Markdown body" value={cBody} onChange={(e) => setCBody(e.target.value)} className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-mono-data text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none resize-none" />
                   <button type="submit" disabled={creating} className="w-full rounded-md bg-emerald-500 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-950 hover:bg-emerald-400 disabled:opacity-50">
                     {creating ? 'Creating…' : 'Create'}

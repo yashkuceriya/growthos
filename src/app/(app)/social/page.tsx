@@ -15,6 +15,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Plus, Share2, Calendar, PenLine, Sparkles, Loader2, Clock, MessageCircle, Briefcase, Camera, Trash2, ChevronLeft, ChevronRight, Send, ExternalLink, AlertTriangle, Heart, MessageSquare, Repeat2, Eye, RefreshCw, Trophy } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AttachVideoButton } from '@/components/ai/AttachVideoButton'
+import { QualityVerdict } from '@/components/marketing/quality-verdict'
+import type { GeneratedQualityScore } from '@/lib/marketing/quality'
 
 interface Engagement {
   likes?: number; replies?: number; shares?: number
@@ -56,6 +58,7 @@ export default function SocialPage() {
   const [cContent, setCContent] = useState('')
   const [cSchedule, setCSchedule] = useState('')
   const [creating, setCreating] = useState(false)
+  const [draftQuality, setDraftQuality] = useState<GeneratedQualityScore | null>(null)
 
   const [aiOpen, setAiOpen] = useState(false)
   const [aiPlatform, setAiPlatform] = useState('twitter')
@@ -153,7 +156,7 @@ export default function SocialPage() {
       ...(linkedCampaign ? { campaign_id: linkedCampaign.id } : {}),
     })
     if (error) toast.error(error.message)
-    else { toast.success(cSchedule ? 'Scheduled' : 'Draft saved'); setCOpen(false); setCContent(''); setCSchedule(''); fetchPosts() }
+    else { toast.success(cSchedule ? 'Scheduled' : 'Draft saved'); setCOpen(false); setCContent(''); setCSchedule(''); setDraftQuality(null); fetchPosts() }
     setCreating(false)
   }
 
@@ -169,6 +172,7 @@ export default function SocialPage() {
       if (!res.ok) throw new Error('Generation failed')
       const post = await res.json()
       const tags = post.hashtags?.length ? '\n\n' + post.hashtags.map((h: string) => `#${h}`).join(' ') : ''
+      setDraftQuality(post.quality ?? null)
       setCPlatform(aiPlatform); setCContent(post.content + tags); setAiOpen(false); setCOpen(true)
       toast.success('Post generated')
     } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed') }
@@ -268,7 +272,7 @@ export default function SocialPage() {
                 </form>
               </DialogContent>
             </Dialog>
-            <Dialog open={cOpen} onOpenChange={setCOpen}>
+            <Dialog open={cOpen} onOpenChange={(open) => { setCOpen(open); if (!open) setDraftQuality(null) }}>
               <DialogTrigger>
                 <div className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-950 hover:bg-emerald-400">
                   <Plus className="h-3.5 w-3.5" /> Compose
@@ -283,6 +287,7 @@ export default function SocialPage() {
                     <option value="instagram">Instagram</option>
                   </select>
                   <textarea required rows={6} placeholder="Write your post…" value={cContent} onChange={(e) => setCContent(e.target.value)} className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none resize-none" />
+                  <QualityVerdict quality={draftQuality} />
                   <div className="flex items-center justify-between text-[10px] font-mono-data text-slate-500">
                     <span>{cContent.length} / {LIMIT[cPlatform]} chars</span>
                     {cContent.length > LIMIT[cPlatform] && <StatusPill tone="error">OVER LIMIT</StatusPill>}

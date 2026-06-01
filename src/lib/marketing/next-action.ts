@@ -35,10 +35,13 @@ export interface NextActionSnapshot {
   adsNeedingReview: number
   socialPostsDraft: number
   socialPostsScheduled: number
+  lowQualityDrafts: number
+  lowQualityDraftHref: string | null
   // Whether at least one published asset has at least one engagement metric
   // synced. Tells us whether we're in the "operate" or "measure" phase.
   hasMeasurements: boolean
   hasManualMetrics: boolean
+  bestChannel: string | null
 
   // Learning
   hasInsights: boolean
@@ -60,8 +63,11 @@ const EMPTY_SNAPSHOT: NextActionSnapshot = {
   adsNeedingReview: 0,
   socialPostsDraft: 0,
   socialPostsScheduled: 0,
+  lowQualityDrafts: 0,
+  lowQualityDraftHref: null,
   hasMeasurements: false,
   hasManualMetrics: false,
+  bestChannel: null,
   hasInsights: false,
   hasWinners: false,
   budgetExceeded: false,
@@ -144,6 +150,19 @@ export function nextBestAction(input: Partial<NextActionSnapshot>): NextBestActi
     }
   }
 
+  // Draft quality gates before scheduling. A local/internal marketing
+  // operating system should improve weak work before it fills the calendar.
+  if (s.lowQualityDrafts > 0) {
+    return {
+      id: 'improve_quality',
+      priority: 'medium',
+      title: `Improve ${s.lowQualityDrafts} weak draft${s.lowQualityDrafts === 1 ? '' : 's'}`,
+      reason: 'Quality checks found drafts that need sharper specificity, channel fit, or conversion intent before launch.',
+      ctaLabel: 'Open drafts',
+      href: s.lowQualityDraftHref ?? '/content',
+    }
+  }
+
   // Drafted social posts that aren't scheduled or published.
   if (s.socialPostsDraft > 0) {
     return {
@@ -169,6 +188,19 @@ export function nextBestAction(input: Partial<NextActionSnapshot>): NextBestActi
     }
   }
 
+  // Manual metrics are present but the memory has not been refreshed into
+  // insights yet. This is the most important step after measurement.
+  if (s.hasManualMetrics && !s.hasInsights) {
+    return {
+      id: 'refresh_learnings',
+      priority: 'medium',
+      title: 'Refresh campaign learnings',
+      reason: 'Metrics are logged. Turn them into reusable channel notes, winning hooks, and next experiments for the agents.',
+      ctaLabel: 'Open campaign',
+      href: s.latestCampaignId ? `/campaigns/${s.latestCampaignId}` : '/campaigns',
+    }
+  }
+
   // Insights exist but no winners promoted yet → promote a winner.
   if (s.hasInsights && !s.hasWinners) {
     return {
@@ -182,6 +214,17 @@ export function nextBestAction(input: Partial<NextActionSnapshot>): NextBestActi
   }
 
   // Everything's healthy → suggest the next experiment.
+  if (s.bestChannel) {
+    return {
+      id: 'double_down',
+      priority: 'low',
+      title: `Double down on ${humanize(s.bestChannel)}`,
+      reason: 'Recent performance data shows this channel is working. Launch a focused follow-up before exploring something new.',
+      ctaLabel: 'Plan follow-up',
+      href: '/launch',
+    }
+  }
+
   return {
     id: 'next_experiment',
     priority: 'low',
@@ -190,4 +233,8 @@ export function nextBestAction(input: Partial<NextActionSnapshot>): NextBestActi
     ctaLabel: 'Plan next launch',
     href: '/launch',
   }
+}
+
+function humanize(value: string): string {
+  return value.replace(/[_-]/g, ' ').replace(/\b\w/g, (match) => match.toUpperCase())
 }

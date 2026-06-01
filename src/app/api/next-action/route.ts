@@ -94,6 +94,8 @@ export async function GET(request: Request) {
   let adsNeedingReview = 0
   let socialPostsDraft = 0
   let socialPostsScheduled = 0
+  let lowQualityDrafts = 0
+  let lowQualityDraftHref: string | null = null
   let hasMeasurements = false
   let hasManualMetrics = false
   let hasWinners = false
@@ -106,7 +108,7 @@ export async function GET(request: Request) {
         .order('created_at', { ascending: false })
         .limit(100),
       supabase.from('social_posts')
-        .select('id', { count: 'exact', head: true })
+        .select('id, platform, content')
         .eq('campaign_id', effectiveCampaignId)
         .eq('status', 'draft'),
       supabase.from('social_posts')
@@ -126,7 +128,7 @@ export async function GET(request: Request) {
         .eq('campaign_id', effectiveCampaignId)
         .eq('is_winner', true),
       supabase.from('content_pieces')
-        .select('id', { count: 'exact', head: true })
+        .select('id, seo_score')
         .eq('campaign_id', effectiveCampaignId),
       supabase.from('landing_pages')
         .select('id', { count: 'exact', head: true })
@@ -137,11 +139,17 @@ export async function GET(request: Request) {
     latestCampaignAssetCount += ads.length
     adsNeedingReview = ads.filter((a) => a.status === 'evaluator_pass' || a.status === 'compliance_pass').length
 
-    socialPostsDraft = (socialDraftRes as unknown as { count?: number | null }).count ?? 0
+    const draftSocial = (socialDraftRes.data ?? []) as Array<{ platform: string | null; content: string | null }>
+    socialPostsDraft = draftSocial.length
     socialPostsScheduled = (socialScheduledRes as unknown as { count?: number | null }).count ?? 0
     latestCampaignAssetCount += socialPostsDraft + socialPostsScheduled
-    latestCampaignAssetCount += ((blogsRes as unknown as { count?: number | null }).count ?? 0)
+    const contentDrafts = (blogsRes.data ?? []) as Array<{ seo_score: number | null }>
+    latestCampaignAssetCount += contentDrafts.length
     latestCampaignAssetCount += ((landingsRes as unknown as { count?: number | null }).count ?? 0)
+    const lowQualitySocial = draftSocial.filter((post) => (post.content ?? '').length > socialLimit(post.platform)).length
+    const lowQualityContent = contentDrafts.filter((piece) => typeof piece.seo_score === 'number' && piece.seo_score < 70).length
+    lowQualityDrafts += lowQualitySocial + lowQualityContent
+    if (lowQualityDrafts > 0) lowQualityDraftHref = lowQualityContent > 0 ? '/content' : '/social'
 
     hasManualMetrics = ((metricsRes as unknown as { count?: number | null }).count ?? 0) > 0
     hasWinners = ((winnersRes as unknown as { count?: number | null }).count ?? 0) > 0
@@ -161,8 +169,11 @@ export async function GET(request: Request) {
     adsNeedingReview,
     socialPostsDraft,
     socialPostsScheduled,
+    lowQualityDrafts,
+    lowQualityDraftHref,
     hasMeasurements,
     hasManualMetrics,
+    bestChannel: bestChannel(memory.performance ?? []),
     hasInsights: memory.launchInsights.current !== null,
     hasWinners,
     budgetExceeded: !budget.ok && !('unavailable' in budget && budget.unavailable),
@@ -172,4 +183,15 @@ export async function GET(request: Request) {
     action: nextBestAction(snapshot),
     snapshot,
   })
+}
+
+function socialLimit(platform: string | null): number {
+  if (platform === 'linkedin') return 3000
+  if (platform === 'instagram') return 2200
+  return 280
+}
+
+function bestChannel(performance: Array<{ channel: string; conversions: number; roas: number | null; clicks: number }>): string | null {
+  const winner = performance.find((row) => row.conversions > 0 || (row.roas ?? 0) > 0 || row.clicks > 0)
+  return winner?.channel ?? null
 }
