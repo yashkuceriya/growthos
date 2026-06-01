@@ -44,6 +44,9 @@ RULES:
 - End with a conclusion + CTA
 - Target word count: ${params.wordCount || 1000} words
 - Write for humans first, search engines second
+- Use the stored product memory, audience, and channel learnings when provided
+- Include concrete product workflows, examples, and proof points; avoid generic marketing filler
+- Make the CTA match the reader's likely next action
 ${params.brandVoice ? `\nBRAND VOICE: ${params.brandVoice}` : ''}${params.styleContext ? `\n\n${params.styleContext}` : ''}`
 
   const outlineStr = params.outline?.length

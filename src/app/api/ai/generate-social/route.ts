@@ -3,6 +3,7 @@ import { generateSocialPost } from '@/lib/ai/social/generator'
 import { trackAICost, estimateCost } from '@/lib/cost-tracker'
 import { modeBlock } from '@/lib/ai/creative/modes'
 import { getMarketingMemory, marketingMemoryPrompt } from '@/lib/marketing/memory'
+import { scoreGeneratedAsset } from '@/lib/marketing/quality'
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -63,5 +64,11 @@ export async function POST(request: Request) {
     costUsd: estimateCost(model, result.inputTokens, result.outputTokens),
   })
 
-  return Response.json(result.post)
+  return Response.json({
+    ...result.post,
+    quality: scoreGeneratedAsset('social_post', {
+      body: result.post.content,
+      hashtags: result.post.hashtags,
+    }, memory),
+  })
 }

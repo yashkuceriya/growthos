@@ -153,6 +153,13 @@ describe('getMarketingMemory', () => {
           ],
           error: null,
         },
+        'campaign_metrics:list': {
+          data: [
+            { channel: 'linkedin', impressions: 1000, clicks: 50, conversions: 5, spend: 100, revenue: 450 },
+            { channel: 'email', impressions: 300, clicks: 60, conversions: 12, spend: 20, revenue: 600 },
+          ],
+          error: null,
+        },
         'style_references:list': {
           data: [
             { asset_kind: 'twitter_post', asset_content: '12 tools I use every day. #1 will surprise you.', why_good: 'list + cliffhanger', metric_proof: { likes: 200 } },
@@ -171,6 +178,7 @@ describe('getMarketingMemory', () => {
     expect(memory.classification.complianceFlags).toEqual(['gdpr'])
     expect(memory.blueprint.vertical).toBe('b2c_saas')
     expect(memory.adInsights).toHaveLength(1)
+    expect(memory.performance[0]).toMatchObject({ channel: 'email', conversions: 12, roas: 30 })
     expect(memory.styleReferences).toHaveLength(1)
     expect(memory.styleReferences[0].whyGood).toBe('list + cliffhanger')
     expect(memory.founderVoice.samples).toContain('I build for the chronically curious.')
@@ -244,6 +252,7 @@ describe('marketingMemoryPrompt', () => {
     } as unknown as Parameters<typeof marketingMemoryPrompt>[0]['blueprint'],
     launchInsights: { lastUpdated: null, lastCampaignId: null, current: null, recentHistory: [] },
     adInsights: [],
+    performance: [],
     founderVoice: { samples: ['I write blunt copy.'], styleNotes: 'plain words' },
     styleReferences: [],
     assetKind: null,
@@ -284,11 +293,16 @@ describe('marketingMemoryPrompt', () => {
       adInsights: [
         { text: 'Stat-shock hooks convert 2x better.', type: 'winning_pattern', dimension: 'clarity', audienceSegment: null, campaignGoal: null },
       ],
+      performance: [
+        { channel: 'email', impressions: 300, clicks: 60, conversions: 12, spend: 20, revenue: 600, ctr: 0.2, conversionRate: 0.2, cpl: 1.6667, roas: 30 },
+      ],
     }
     const prompt = marketingMemoryPrompt(enriched, 'ad_copy')
     expect(prompt).toContain('PROVEN STYLE REFERENCES for twitter_post')
     expect(prompt).toContain('Ad performance insights')
     expect(prompt).toContain('Stat-shock hooks')
+    expect(prompt).toContain('RECENT CHANNEL PERFORMANCE')
+    expect(prompt).toContain('email | 12 conv | $20.00 spend | 30.00x ROAS')
   })
 
   it('summarizes launch insights when current is populated', () => {

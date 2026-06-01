@@ -91,6 +91,19 @@ export interface MemoryStyleReference {
   metricProof: unknown | null
 }
 
+export interface MemoryPerformance {
+  channel: string
+  impressions: number
+  clicks: number
+  conversions: number
+  spend: number
+  revenue: number
+  ctr: number | null
+  conversionRate: number | null
+  cpl: number | null
+  roas: number | null
+}
+
 export interface MemoryFounderVoice {
   samples: string[]
   styleNotes: string | null
@@ -103,6 +116,7 @@ export interface MarketingMemory {
   blueprint: MarketingBlueprint
   launchInsights: MemoryLaunchInsights
   adInsights: MemoryAdInsight[]
+  performance: MemoryPerformance[]
   founderVoice: MemoryFounderVoice
   styleReferences: MemoryStyleReference[]
   assetKind: string | null
@@ -129,11 +143,12 @@ export async function getMarketingMemory(args: MarketingMemoryArgs): Promise<Mar
   // Fan-out reads — every branch is wrapped so one slow/broken table never
   // breaks generation. Memory is a best-effort bundle; missing pieces just
   // collapse to empty arrays / nulls. The prompt builder skips empties.
-  const [projectRow, founderVoiceRow, styleRefsRow, adInsightsRow] = await Promise.all([
+  const [projectRow, founderVoiceRow, styleRefsRow, adInsightsRow, performanceRows] = await Promise.all([
     fetchProject(supabase, projectId),
     fetchFounderVoice(supabase, userId),
     assetKind ? fetchStyleReferences(supabase, userId, assetKind) : Promise.resolve([] as MemoryStyleReference[]),
     fetchAdInsights(supabase, projectId),
+    fetchPerformance(supabase, projectId),
   ])
 
   const project = projectRow ?? { id: projectId, name: '', website: null, description: null, brand_voice: {} as Record<string, unknown> }
@@ -160,6 +175,7 @@ export async function getMarketingMemory(args: MarketingMemoryArgs): Promise<Mar
     blueprint,
     launchInsights,
     adInsights: adInsightsRow,
+    performance: performanceRows,
     founderVoice: founderVoiceRow,
     styleReferences: styleRefsRow,
     assetKind: assetKind ?? null,
@@ -184,6 +200,9 @@ export function marketingMemoryPrompt(memory: MarketingMemory, surface: MemorySu
 
   const insightsBlock = strategyInsightsBlock(memory, surface)
   if (insightsBlock) blocks.push(insightsBlock)
+
+  const performanceBlock = channelPerformanceBlock(memory, surface)
+  if (performanceBlock) blocks.push(performanceBlock)
 
   const voiceBlock = founderVoiceBlock(memory)
   if (voiceBlock) blocks.push(voiceBlock)
@@ -280,6 +299,51 @@ async function fetchAdInsights(supabase: MemorySupabaseClient, projectId: string
         audienceSegment: typeof r.audience_segment === 'string' ? r.audience_segment : null,
         campaignGoal: typeof r.campaign_goal === 'string' ? r.campaign_goal : null,
       }))
+  } catch {
+    return []
+  }
+}
+
+async function fetchPerformance(supabase: MemorySupabaseClient, projectId: string): Promise<MemoryPerformance[]> {
+  try {
+    const { data, error } = await supabase
+      .from('campaign_metrics')
+      .select('channel, impressions, clicks, conversions, spend, revenue, campaigns!inner(project_id)')
+      .eq('campaigns.project_id', projectId)
+      .order('date', { ascending: false })
+      .limit(200)
+    if (error || !Array.isArray(data)) return []
+
+    const grouped = new Map<string, {
+      impressions: number
+      clicks: number
+      conversions: number
+      spend: number
+      revenue: number
+    }>()
+
+    for (const row of data as Array<Record<string, unknown>>) {
+      const channel = str(row.channel) ?? 'unknown'
+      const current = grouped.get(channel) ?? { impressions: 0, clicks: 0, conversions: 0, spend: 0, revenue: 0 }
+      current.impressions += num(row.impressions)
+      current.clicks += num(row.clicks)
+      current.conversions += num(row.conversions)
+      current.spend += num(row.spend)
+      current.revenue += num(row.revenue)
+      grouped.set(channel, current)
+    }
+
+    return Array.from(grouped.entries())
+      .map(([channel, row]) => ({
+        channel,
+        ...row,
+        ctr: row.impressions > 0 ? round(row.clicks / row.impressions) : null,
+        conversionRate: row.clicks > 0 ? round(row.conversions / row.clicks) : null,
+        cpl: row.conversions > 0 ? round(row.spend / row.conversions) : null,
+        roas: row.spend > 0 ? round(row.revenue / row.spend) : null,
+      }))
+      .sort((a, b) => (b.roas ?? 0) - (a.roas ?? 0))
+      .slice(0, 6)
   } catch {
     return []
   }
@@ -419,6 +483,25 @@ function strategyInsightsBlock(memory: MarketingMemory, surface: MemorySurface):
   return ['MARKETING MEMORY (use these lessons)', ...lines].join('\n')
 }
 
+function channelPerformanceBlock(memory: MarketingMemory, surface: MemorySurface): string | null {
+  if (!memory.performance.length) return null
+  if (!['launch_strategy', 'ad_copy', 'social_post', 'email', 'blog', 'landing_page'].includes(surface)) return null
+
+  const lines = memory.performance.slice(0, 5).map((row) => {
+    const parts = [
+      `${row.channel}`,
+      `${row.conversions} conv`,
+      `$${row.spend.toFixed(2)} spend`,
+    ]
+    if (row.roas != null) parts.push(`${row.roas.toFixed(2)}x ROAS`)
+    if (row.ctr != null) parts.push(`${(row.ctr * 100).toFixed(1)}% CTR`)
+    if (row.cpl != null) parts.push(`$${row.cpl.toFixed(2)} CPL`)
+    return `- ${parts.join(' | ')}`
+  })
+
+  return ['RECENT CHANNEL PERFORMANCE (prefer what is working, fix what is not)', ...lines].join('\n')
+}
+
 function summarizeLaunchInsights(current: Record<string, unknown>): string | null {
   const lines: string[] = []
   const winning = stringArray(current.winning_hooks ?? current.winning_patterns)
@@ -512,4 +595,13 @@ function str(value: unknown): string | null {
 function stringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+}
+
+function num(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : Number(value ?? 0)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function round(value: number): number {
+  return Math.round(value * 10_000) / 10_000
 }

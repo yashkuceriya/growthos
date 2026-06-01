@@ -30,6 +30,7 @@ function makeMemory(overrides: Partial<MarketingMemory> = {}): MarketingMemory {
     },
     launchInsights: { lastUpdated: null, lastCampaignId: null, current: null, recentHistory: [] },
     adInsights: [],
+    performance: [],
     founderVoice: { samples: [], styleNotes: null },
     styleReferences: [],
     assetKind: null,

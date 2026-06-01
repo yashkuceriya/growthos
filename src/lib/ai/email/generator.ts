@@ -41,6 +41,9 @@ RULES:
 - Include a clear CTA button styled with inline CSS (background color, padding, border-radius)
 - Personalize with {{name}} placeholder where appropriate
 - Keep total email under 200 words for maximum engagement
+- Anchor the email in the stored audience, product memory, and campaign lessons when provided
+- Include one concrete product capability or proof point instead of generic benefit language
+- Make the CTA specific to the email purpose
 ${params.brandVoice ? `\nBRAND VOICE: ${params.brandVoice}` : ''}${params.styleContext ? `\n\n${params.styleContext}` : ''}`
 
   const keyPointsStr = params.keyPoints?.length

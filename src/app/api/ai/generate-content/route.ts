@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { generateBlogPost } from '@/lib/ai/content/generator'
 import { trackAICost, estimateCost } from '@/lib/cost-tracker'
 import { getMarketingMemory, marketingMemoryPrompt } from '@/lib/marketing/memory'
+import { scoreGeneratedAsset } from '@/lib/marketing/quality'
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -41,5 +42,12 @@ export async function POST(request: Request) {
     costUsd: estimateCost(model, result.inputTokens, result.outputTokens),
   })
 
-  return Response.json(result.post)
+  return Response.json({
+    ...result.post,
+    quality: scoreGeneratedAsset('blog', {
+      title: result.post.title,
+      body: result.post.body_markdown,
+      targetKeyword,
+    }, memory),
+  })
 }

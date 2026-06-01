@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { generateEmailCopy } from '@/lib/ai/email/generator'
 import { trackAICost, estimateCost } from '@/lib/cost-tracker'
 import { getMarketingMemory, marketingMemoryPrompt } from '@/lib/marketing/memory'
+import { scoreGeneratedAsset } from '@/lib/marketing/quality'
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -53,5 +54,12 @@ export async function POST(request: Request) {
     costUsd: estimateCost(model, result.inputTokens, result.outputTokens),
   })
 
-  return Response.json(result.email)
+  return Response.json({
+    ...result.email,
+    quality: scoreGeneratedAsset('email', {
+      subject: result.email.subject,
+      previewText: result.email.preview_text,
+      body: result.email.body_html,
+    }, memory),
+  })
 }

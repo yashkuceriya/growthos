@@ -50,6 +50,9 @@ RULES:
 - ${params.platform === 'linkedin' ? 'Use line breaks for readability. Start with a hook line. End with a question to drive engagement.' : ''}
 - ${params.platform === 'instagram' ? 'Lead with a strong hook. Use emojis sparingly (2-3). End with a CTA.' : ''}
 - Do NOT include hashtags in the content field — put them in the hashtags array
+- Tie the post to the exact audience, product, and campaign memory when provided
+- Include one concrete product detail, result, workflow, or proof point
+- End with a real next step, not a vague engagement-bait line
 ${params.brandVoice ? `\nBRAND VOICE: ${params.brandVoice}` : ''}${params.styleContext ? `\n\n${params.styleContext}` : ''}`
 
   const userMessage = `Create a ${params.contentType || 'engaging'} ${params.platform} post.
