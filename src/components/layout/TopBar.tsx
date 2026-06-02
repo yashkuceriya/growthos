@@ -12,6 +12,7 @@ import {
   DollarSign,
   FileText,
   HelpCircle,
+  ListChecks,
   Megaphone,
   Rocket,
   Search,
@@ -45,6 +46,13 @@ const commands: Command[] = [
     detail: 'Review launches and assets',
     keywords: 'campaigns assets metrics learning',
     icon: Megaphone,
+  },
+  {
+    href: '/quality',
+    title: 'Review quality',
+    detail: 'Rank and improve weak assets',
+    keywords: 'quality review score weak assets improve',
+    icon: ListChecks,
   },
   {
     href: '/ad-studio/generate',

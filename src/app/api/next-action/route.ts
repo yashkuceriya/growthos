@@ -149,7 +149,7 @@ export async function GET(request: Request) {
     const lowQualitySocial = draftSocial.filter((post) => (post.content ?? '').length > socialLimit(post.platform)).length
     const lowQualityContent = contentDrafts.filter((piece) => typeof piece.seo_score === 'number' && piece.seo_score < 70).length
     lowQualityDrafts += lowQualitySocial + lowQualityContent
-    if (lowQualityDrafts > 0) lowQualityDraftHref = lowQualityContent > 0 ? '/content' : '/social'
+    if (lowQualityDrafts > 0) lowQualityDraftHref = '/quality'
 
     hasManualMetrics = ((metricsRes as unknown as { count?: number | null }).count ?? 0) > 0
     hasWinners = ((winnersRes as unknown as { count?: number | null }).count ?? 0) > 0

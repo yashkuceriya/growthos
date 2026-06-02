@@ -78,11 +78,11 @@ describe('nextBestAction', () => {
     const action = nextBestAction({
       hasProject: true, projectWebsite: 'https://x.com', blueprint: READY_BLUEPRINT,
       campaignCount: 1, latestCampaignAssetCount: 6,
-      adsNeedingReview: 0, lowQualityDrafts: 2, lowQualityDraftHref: '/social', socialPostsDraft: 4,
+      adsNeedingReview: 0, lowQualityDrafts: 2, lowQualityDraftHref: '/quality', socialPostsDraft: 4,
     })
     expect(action.id).toBe('improve_quality')
     expect(action.title).toContain('2 weak')
-    expect(action.href).toBe('/social')
+    expect(action.href).toBe('/quality')
   })
 
   it('prompts to log metrics when nothing has been measured yet', () => {

@@ -58,6 +58,16 @@ interface Asset {
   quality?: GeneratedQualityScore | null
 }
 
+interface QualityApiAsset {
+  id: string
+  channel: ChannelKey | string
+  surface: string
+  title: string
+  body: string
+  href: string
+  quality: GeneratedQualityScore
+}
+
 interface LaunchChannelRec {
   channel: ChannelKey
   tier: 'primary' | 'secondary' | 'off'
@@ -157,37 +167,24 @@ export default function LaunchPage() {
   }
 
   async function refreshAssets(projectId: string) {
-    // Re-fetch assets from all relevant tables
-    const [ads, social, emailSeq, content, landing] = await Promise.all([
-      supabase.from('ad_copies').select('id, headline, primary_text, cta_button, metadata, ad_briefs!inner(platform, project_id)').eq('ad_briefs.project_id', projectId).eq('metadata->>launch_run', 'true').order('created_at', { ascending: false }).limit(20),
-      supabase.from('social_posts').select('id, platform, content, metadata').eq('project_id', projectId).eq('metadata->>launch_run', 'true').order('created_at', { ascending: false }).limit(30),
-      supabase.from('email_templates').select('id, subject, body_html, metadata').eq('project_id', projectId).eq('category', 'welcome').order('created_at', { ascending: false }).limit(10),
-      supabase.from('content_pieces').select('id, title, body_markdown, metadata').eq('project_id', projectId).eq('metadata->>launch_run', 'true').order('created_at', { ascending: false }).limit(5),
-      supabase.from('landing_pages').select('id, name, slug, template, metadata').eq('project_id', projectId).order('created_at', { ascending: false }).limit(3),
-    ])
-
     const next: Record<ChannelKey, Asset[]> = Object.fromEntries(CHANNELS.map((c) => [c.key, []])) as unknown as Record<ChannelKey, Asset[]>
-
-    ;(ads.data ?? []).forEach((a: Record<string, unknown>) => {
-      const platform = (a.ad_briefs as { platform: string } | undefined)?.platform
-      if (platform === 'meta') next.meta.push({ kind: 'ad', title: a.headline as string ?? 'Meta ad', body: `${a.primary_text}\n\nCTA: ${a.cta_button}`, metadata: a, quality: readAssetQuality(a) })
-      if (platform === 'linkedin') next.linkedin.push({ kind: 'ad', title: a.headline as string ?? 'LinkedIn ad', body: a.primary_text as string, metadata: a, quality: readAssetQuality(a) })
-    })
-    ;(social.data ?? []).forEach((s: Record<string, unknown>) => {
-      const platform = s.platform as ChannelKey
-      if (next[platform]) next[platform].push({ kind: platform, title: (s.metadata as Record<string, unknown>)?.title as string ?? `${platform} post`, body: s.content as string, metadata: s, quality: readAssetQuality(s) })
-    })
-    ;(emailSeq.data ?? []).forEach((e: Record<string, unknown>) => {
-      next.email.push({ kind: 'email', title: e.subject as string, body: e.body_html as string, metadata: e, quality: readAssetQuality(e) })
-    })
-    ;(content.data ?? []).forEach((c: Record<string, unknown>) => {
-      next.blog.push({ kind: 'blog', title: c.title as string, body: c.body_markdown as string, url: `/content?id=${c.id}`, metadata: c, quality: readAssetQuality(c) })
-    })
-    ;(landing.data ?? []).forEach((l: Record<string, unknown>) => {
-      const t = l.template as { headline?: string } ?? {}
-      next.landing.push({ kind: 'landing', title: t.headline ?? l.name as string, body: `Slug: /p/${l.slug}`, url: `/p/${l.slug}`, metadata: l, quality: readAssetQuality(l) })
-    })
-
+    const res = await fetch(`/api/quality/assets?projectId=${encodeURIComponent(projectId)}&limit=100`)
+    if (!res.ok) {
+      setAssets(next)
+      return
+    }
+    const body = (await res.json()) as { items?: QualityApiAsset[] }
+    for (const item of body.items ?? []) {
+      const channel = item.channel as ChannelKey
+      if (!next[channel]) continue
+      next[channel].push({
+        kind: item.surface,
+        title: item.title,
+        body: item.body,
+        url: item.href,
+        quality: item.quality,
+      })
+    }
     setAssets(next)
   }
 
@@ -912,16 +909,6 @@ function StatusIndicator({ state, hasAssets }: { state: ChannelState; hasAssets:
   if (state.status === 'ready' || hasAssets) return <CheckCircle2 className="h-4 w-4 text-emerald-400" />
   if (state.status === 'failed') return <AlertCircle className="h-4 w-4 text-rose-400" />
   return <span className="h-4 w-4 rounded-full border border-slate-700" />
-}
-
-function readAssetQuality(row: Record<string, unknown>): GeneratedQualityScore | null {
-  const metadata = row.metadata
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null
-  const quality = (metadata as Record<string, unknown>).quality
-  if (!quality || typeof quality !== 'object' || Array.isArray(quality)) return null
-  const overall = (quality as Record<string, unknown>).overall
-  if (typeof overall !== 'number') return null
-  return quality as GeneratedQualityScore
 }
 
 function ChannelDrawer({

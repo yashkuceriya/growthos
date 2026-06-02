@@ -4,6 +4,9 @@
 -- columns even though launch generation writes metadata into them. Keep this
 -- idempotent so it is safe to paste into Supabase SQL editor after a restore.
 
+alter table public.projects
+  add column if not exists monthly_ai_budget_usd numeric(10, 2);
+
 alter table public.ad_copies
   add column if not exists metadata jsonb not null default '{}';
 

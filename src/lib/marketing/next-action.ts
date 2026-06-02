@@ -159,7 +159,7 @@ export function nextBestAction(input: Partial<NextActionSnapshot>): NextBestActi
       title: `Improve ${s.lowQualityDrafts} weak draft${s.lowQualityDrafts === 1 ? '' : 's'}`,
       reason: 'Quality checks found drafts that need sharper specificity, channel fit, or conversion intent before launch.',
       ctaLabel: 'Open drafts',
-      href: s.lowQualityDraftHref ?? '/content',
+      href: s.lowQualityDraftHref ?? '/quality',
     }
   }
 

@@ -54,13 +54,13 @@ export function AllProjectsGrid() {
       const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0)
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
 
-      const [adsRes, leadsRes, costsRes, campRes, projRes] = await Promise.all([
+      const [adsRes, leadsRes, costsRes, campRes] = await Promise.all([
         supabase.from('ad_copies').select('brief_id, ad_briefs!inner(project_id, created_at)').gte('ad_briefs.created_at', monthStart.toISOString()).in('ad_briefs.project_id', ids),
         supabase.from('leads').select('project_id, created_at').in('project_id', ids).gte('created_at', sevenDaysAgo.toISOString()),
         supabase.from('ai_cost_ledger').select('project_id, cost_usd').in('project_id', ids).gte('created_at', monthStart.toISOString()),
         supabase.from('campaigns').select('id, name, status, project_id, created_at').in('project_id', ids).order('created_at', { ascending: false }).limit(200),
-        supabase.from('projects').select('id, brand_voice, monthly_ai_budget_usd').in('id', ids),
       ])
+      const projRes = await fetchProjectBudgetRows(supabase, ids)
 
       const adsByProject: Record<string, number> = {}
       for (const row of (adsRes.data as Array<{ ad_briefs: { project_id: string } }> | null) ?? []) {
@@ -202,6 +202,17 @@ export function AllProjectsGrid() {
       )}
     </SectionPanel>
   )
+}
+
+async function fetchProjectBudgetRows(
+  supabase: ReturnType<typeof createClient>,
+  ids: string[],
+): Promise<{ data: Array<{ id: string; brand_voice: Record<string, unknown> | null; monthly_ai_budget_usd: number | null }> | null }> {
+  const fallback = await supabase.from('projects').select('id, brand_voice').in('id', ids)
+  return {
+    data: ((fallback.data as Array<{ id: string; brand_voice: Record<string, unknown> | null }> | null) ?? [])
+      .map((row) => ({ ...row, monthly_ai_budget_usd: null })),
+  }
 }
 
 function MiniStat({ icon, label, value, tone }: { icon: React.ReactNode; label: string; value: string | number; tone?: 'error' }) {
