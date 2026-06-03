@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { AlertTriangle, CheckCircle2, ExternalLink, Loader2, RefreshCw, Search, Sparkles } from 'lucide-react'
+import { toast } from 'sonner'
 import { useProject } from '@/hooks/use-project'
 import { PageShell } from '@/components/ui/page-shell'
 import { PageHeader } from '@/components/ui/page-header'
@@ -46,6 +47,7 @@ export default function QualityPage() {
   const [band, setBand] = useState<Band>('weak')
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [improvingId, setImprovingId] = useState<string | null>(null)
 
   async function load() {
     if (!activeProject?.id) return
@@ -79,6 +81,33 @@ export default function QualityPage() {
   }, [band, data?.items, query])
 
   const selected = filtered.find((item) => item.id === selectedId) ?? filtered[0] ?? null
+
+  async function improveSelected() {
+    if (!activeProject?.id || !selected) return
+    setImprovingId(selected.id)
+    try {
+      const res = await fetch('/api/quality/improve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: activeProject.id,
+          id: selected.id,
+          channel: selected.channel,
+          surface: selected.surface,
+        }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.error ?? 'Improve failed')
+      const before = body.before?.overall
+      const after = body.after?.overall
+      toast.success(before && after ? `Improved ${before}/10 → ${after}/10` : 'Asset improved')
+      await load()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Improve failed')
+    } finally {
+      setImprovingId(null)
+    }
+  }
 
   if (!activeProject) {
     return <PageShell><p className="text-slate-400">Select a project</p></PageShell>
@@ -182,9 +211,19 @@ export default function QualityPage() {
         <SectionPanel
           title={selected ? 'Asset Verdict' : 'No Asset Selected'}
           action={selected ? (
-            <Link href={selected.href} className="inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-800">
-              <ExternalLink className="h-3 w-3" /> Open
-            </Link>
+            <>
+              <button
+                onClick={() => void improveSelected()}
+                disabled={improvingId === selected.id}
+                className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-300 hover:bg-emerald-500/15 disabled:opacity-50"
+              >
+                {improvingId === selected.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                Improve
+              </button>
+              <Link href={selected.href} className="inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-800">
+                <ExternalLink className="h-3 w-3" /> Open
+              </Link>
+            </>
           ) : null}
         >
           {selected ? (
