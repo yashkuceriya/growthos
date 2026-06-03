@@ -48,6 +48,8 @@ export default function QualityPage() {
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [improvingId, setImprovingId] = useState<string | null>(null)
+  const [batchImproving, setBatchImproving] = useState(false)
+  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null)
 
   async function load() {
     if (!activeProject?.id) return
@@ -81,32 +83,72 @@ export default function QualityPage() {
   }, [band, data?.items, query])
 
   const selected = filtered.find((item) => item.id === selectedId) ?? filtered[0] ?? null
+  const weakBatch = useMemo(() => filtered.filter((item) => item.band === 'weak').slice(0, 5), [filtered])
+
+  async function improveAsset(asset: QualityAsset) {
+    if (!activeProject?.id) throw new Error('Select a project')
+    const res = await fetch('/api/quality/improve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projectId: activeProject.id,
+        id: asset.id,
+        channel: asset.channel,
+        surface: asset.surface,
+      }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(body.error ?? 'Improve failed')
+    return body as { before?: { overall?: number }; after?: { overall?: number } }
+  }
 
   async function improveSelected() {
-    if (!activeProject?.id || !selected) return
+    if (!selected) return
     setImprovingId(selected.id)
     try {
-      const res = await fetch('/api/quality/improve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          projectId: activeProject.id,
-          id: selected.id,
-          channel: selected.channel,
-          surface: selected.surface,
-        }),
-      })
-      const body = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(body.error ?? 'Improve failed')
-      const before = body.before?.overall
-      const after = body.after?.overall
-      toast.success(before && after ? `Improved ${before}/10 → ${after}/10` : 'Asset improved')
+      const result = await improveAsset(selected)
+      const before = result.before?.overall
+      const after = result.after?.overall
+      toast.success(before && after ? `Improved ${before}/10 -> ${after}/10` : 'Asset improved')
       await load()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Improve failed')
     } finally {
       setImprovingId(null)
     }
+  }
+
+  async function improveWeakBatch() {
+    const candidates = weakBatch
+    if (!candidates.length) {
+      toast.info('No weak assets in this view')
+      return
+    }
+
+    setBatchImproving(true)
+    setBatchProgress({ done: 0, total: candidates.length })
+    let improved = 0
+    let failed = 0
+
+    for (const asset of candidates) {
+      setImprovingId(asset.id)
+      try {
+        await improveAsset(asset)
+        improved += 1
+      } catch (err) {
+        failed += 1
+        toast.error(`${asset.title}: ${err instanceof Error ? err.message : 'Improve failed'}`)
+      } finally {
+        setBatchProgress((current) => current ? { ...current, done: current.done + 1 } : current)
+      }
+    }
+
+    setImprovingId(null)
+    setBatchImproving(false)
+    setBatchProgress(null)
+    if (improved > 0) toast.success(`Improved ${improved} weak asset${improved === 1 ? '' : 's'}`)
+    if (failed > 0 && improved === 0) toast.error('Batch improve failed')
+    await load()
   }
 
   if (!activeProject) {
@@ -119,14 +161,24 @@ export default function QualityPage() {
         title="Quality Review"
         subtitle="Rank, inspect, and fix marketing assets before they go live."
         actions={
-          <button
-            onClick={() => void load()}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-800 disabled:opacity-50"
-          >
-            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-            Refresh
-          </button>
+          <>
+            <button
+              onClick={() => void improveWeakBatch()}
+              disabled={batchImproving || loading || weakBatch.length === 0}
+              className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-300 hover:bg-emerald-500/15 disabled:opacity-50"
+            >
+              {batchImproving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+              {batchProgress ? `${batchProgress.done}/${batchProgress.total}` : `Improve ${weakBatch.length || 0} weak`}
+            </button>
+            <button
+              onClick={() => void load()}
+              disabled={loading || batchImproving}
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+            >
+              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              Refresh
+            </button>
+          </>
         }
       />
 
