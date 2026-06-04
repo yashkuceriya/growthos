@@ -8,7 +8,7 @@ import { toast } from 'sonner'
 import {
   LayoutDashboard, Megaphone, Sparkles, Mail, Share2, FileText, Users,
   BarChart3, DollarSign, Settings, LogOut, Zap, HelpCircle, FolderKanban,
-  Globe, Plus, Rocket, Briefcase, AlertTriangle, Film, ListChecks,
+  Globe, Plus, Rocket, Briefcase, AlertTriangle, Film, ListChecks, Brain,
 } from 'lucide-react'
 import { ProjectSwitcher } from './ProjectSwitcher'
 import { LOCAL_DEV_AUTH_COOKIE, hasLocalDevSessionCookie } from '@/lib/local-dev-auth'
@@ -16,6 +16,7 @@ import { LOCAL_DEV_AUTH_COOKIE, hasLocalDevSessionCookie } from '@/lib/local-dev
 const primaryNav = [
   { href: '/agency', label: 'Agency', icon: Briefcase },
   { href: '/launch', label: 'Launch', icon: Rocket },
+  { href: '/personas', label: 'Personas', icon: Brain },
   { href: '/quality', label: 'Quality Review', icon: ListChecks },
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/projects', label: 'Projects', icon: FolderKanban },

@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { getMarketingMemory } from '@/lib/marketing/memory'
 import { scoreGeneratedAsset, type GeneratedQualityScore } from '@/lib/marketing/quality'
+import { inferPersonasFromMemory, normalizePersonaRow, type MarketingPersona } from '@/lib/marketing/personas'
 
 type QualityBand = 'weak' | 'review' | 'strong'
 
@@ -24,6 +25,7 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url)
   const projectId = url.searchParams.get('projectId')
+  const personaId = url.searchParams.get('personaId')
   const limit = Math.min(120, Math.max(10, Number(url.searchParams.get('limit') ?? 80)))
   if (!projectId) return Response.json({ error: 'projectId required' }, { status: 400 })
 
@@ -35,6 +37,7 @@ export async function GET(request: Request) {
   if (!project) return Response.json({ error: 'Project not found' }, { status: 404 })
 
   const memory = await getMarketingMemory({ supabase, userId: user.id, projectId })
+  const persona = personaId ? await loadPersona(supabase, projectId, personaId, memory) : null
 
   const [ads, social, emails, content, landing] = await Promise.all([
     safeQuery<Array<Record<string, unknown>>>(() => supabase
@@ -79,14 +82,14 @@ export async function GET(request: Request) {
       headline: title,
       body,
       cta: str(row.cta_button),
-    }, memory)
+    }, memory, persona)
     items.push(asset(row, platform, 'ad', title, `${body}\n\nCTA: ${str(row.cta_button)}`, '/ad-studio', str(row.status), quality))
   }
 
   for (const row of social) {
     const platform = str(row.platform) || 'social'
     const body = str(row.content)
-    const quality = scoreGeneratedAsset('social_post', { body }, memory)
+    const quality = scoreGeneratedAsset('social_post', { body }, memory, persona)
     items.push(asset(row, platform, 'social', `${humanize(platform)} post`, body, '/social', str(row.status), quality))
   }
 
@@ -96,7 +99,7 @@ export async function GET(request: Request) {
     const quality = scoreGeneratedAsset('email', {
       subject: title,
       body,
-    }, memory)
+    }, memory, persona)
     items.push(asset(row, 'email', 'email', title, body, '/email', str(row.category), quality))
   }
 
@@ -108,7 +111,7 @@ export async function GET(request: Request) {
       title,
       body,
       targetKeyword: keywords[0],
-    }, memory)
+    }, memory, persona)
     items.push(asset(row, 'blog', str(row.content_type) || 'content', title, body, `/content?id=${row.id}`, str(row.status), quality))
   }
 
@@ -120,7 +123,7 @@ export async function GET(request: Request) {
       headline: title,
       body,
       cta: str(template.ctaText),
-    }, memory)
+    }, memory, persona)
     const slug = str(row.slug)
     items.push(asset(row, 'landing', 'landing', title, body || `Slug: /p/${slug}`, slug ? `/p/${slug}` : '/leads/pages', str(row.published) || null, quality))
   }
@@ -131,6 +134,7 @@ export async function GET(request: Request) {
 
   return Response.json({
     items: sorted,
+    persona,
     summary: {
       total: sorted.length,
       weak: sorted.filter((item) => item.band === 'weak').length,
@@ -139,6 +143,29 @@ export async function GET(request: Request) {
       average: sorted.length ? Math.round((sorted.reduce((sum, item) => sum + item.quality.overall, 0) / sorted.length) * 10) / 10 : null,
     },
   })
+}
+
+async function loadPersona(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  projectId: string,
+  personaId: string,
+  memory: Awaited<ReturnType<typeof getMarketingMemory>>,
+): Promise<MarketingPersona | null> {
+  if (personaId.startsWith('preset-')) {
+    return inferPersonasFromMemory(memory).find((persona) => persona.id === personaId) ?? null
+  }
+
+  try {
+    const { data } = await supabase
+      .from('personas')
+      .select('*')
+      .eq('project_id', projectId)
+      .eq('id', personaId)
+      .maybeSingle()
+    return data ? normalizePersonaRow(data as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
 }
 
 async function safeQuery<T>(query: () => PromiseLike<{ data: T | null; error?: { message?: string } | null }>): Promise<T> {

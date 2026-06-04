@@ -11,6 +11,7 @@ const DIMENSIONS: Array<keyof GeneratedQualityScore['dimensions']> = [
   'channelFit',
   'specificity',
   'conversionIntent',
+  'personaFit',
 ]
 
 export function QualityVerdict({ quality }: { quality?: GeneratedQualityScore | null }) {
@@ -42,6 +43,7 @@ export function QualityVerdict({ quality }: { quality?: GeneratedQualityScore | 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
         {DIMENSIONS.map((key) => {
           const dimension = quality.dimensions[key]
+          if (!dimension) return null
           return (
             <div key={key} className="min-w-0 rounded border border-slate-800 bg-slate-900/60 px-2 py-1.5">
               <div className="truncate text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label(key)}</div>

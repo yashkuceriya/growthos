@@ -11,6 +11,7 @@ import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill, type StatusTone } from '@/components/ui/status-pill'
 import { QualityVerdict } from '@/components/marketing/quality-verdict'
 import type { GeneratedQualityScore } from '@/lib/marketing/quality'
+import type { MarketingPersona } from '@/lib/marketing/personas'
 import { cn } from '@/lib/utils'
 
 type Band = 'all' | 'weak' | 'review' | 'strong'
@@ -50,13 +51,17 @@ export default function QualityPage() {
   const [improvingId, setImprovingId] = useState<string | null>(null)
   const [batchImproving, setBatchImproving] = useState(false)
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null)
+  const [personas, setPersonas] = useState<MarketingPersona[]>([])
+  const [personaId, setPersonaId] = useState<string>('baseline')
 
   async function load() {
     if (!activeProject?.id) return
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/quality/assets?projectId=${encodeURIComponent(activeProject.id)}&limit=100`)
+      const params = new URLSearchParams({ projectId: activeProject.id, limit: '100' })
+      if (personaId !== 'baseline') params.set('personaId', personaId)
+      const res = await fetch(`/api/quality/assets?${params.toString()}`)
       const body = await res.json()
       if (!res.ok) throw new Error(body.error ?? 'Quality review failed')
       setData(body as QualityResponse)
@@ -71,6 +76,14 @@ export default function QualityPage() {
   useEffect(() => {
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProject?.id, personaId])
+
+  useEffect(() => {
+    if (!activeProject?.id) return
+    fetch(`/api/personas?project_id=${encodeURIComponent(activeProject.id)}`)
+      .then((res) => res.ok ? res.json() : null)
+      .then((body) => setPersonas(body?.personas ?? []))
+      .catch(() => setPersonas([]))
   }, [activeProject?.id])
 
   const filtered = useMemo(() => {
@@ -210,15 +223,27 @@ export default function QualityPage() {
             </button>
           ))}
         </div>
-        <label className="relative w-full md:w-80">
-          <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search assets"
-            className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 pl-8 text-xs text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none"
-          />
-        </label>
+        <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
+          <select
+            value={personaId}
+            onChange={(event) => setPersonaId(event.target.value)}
+            className="rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-200 focus:border-emerald-500 focus:outline-none"
+          >
+            <option value="baseline">Baseline quality</option>
+            {personas.map((persona) => (
+              <option key={persona.id} value={persona.id}>{persona.name}</option>
+            ))}
+          </select>
+          <label className="relative w-full md:w-80">
+            <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search assets"
+              className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 pl-8 text-xs text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none"
+            />
+          </label>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
@@ -298,6 +323,12 @@ export default function QualityPage() {
                 </div>
                 {selected.quality.recommendations[0] ?? 'This asset is strong. Use it as a style reference or promote it after results come in.'}
               </div>
+              {selected.quality.dimensions.personaFit && (
+                <div className="rounded-md border border-sky-500/20 bg-sky-500/5 p-3 text-xs text-slate-300">
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-sky-300">Persona lens</div>
+                  {selected.quality.dimensions.personaFit.rationale}
+                </div>
+              )}
             </div>
           ) : (
             <p className="text-sm text-slate-500">Pick an asset to inspect.</p>

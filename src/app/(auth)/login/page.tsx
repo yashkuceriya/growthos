@@ -37,7 +37,9 @@ function LoginForm() {
         toast.error(error.message)
       }
     } else {
-      document.cookie = `${LOCAL_DEV_AUTH_COOKIE}=; path=/; max-age=0; SameSite=Lax`
+      document.cookie = isLocalDevCredentials(email, password)
+        ? `${LOCAL_DEV_AUTH_COOKIE}=1; path=/; max-age=${60 * 60 * 24 * 30}; SameSite=Lax`
+        : `${LOCAL_DEV_AUTH_COOKIE}=; path=/; max-age=0; SameSite=Lax`
       router.push(redirectTo)
       router.refresh()
     }

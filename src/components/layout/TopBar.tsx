@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   BarChart3,
   Bell,
+  Brain,
   CheckCircle2,
   DollarSign,
   FileText,
@@ -46,6 +47,13 @@ const commands: Command[] = [
     detail: 'Review launches and assets',
     keywords: 'campaigns assets metrics learning',
     icon: Megaphone,
+  },
+  {
+    href: '/personas',
+    title: 'Open personas',
+    detail: 'Buyer minds and persona fit',
+    keywords: 'personas buyer icp audience objections vocabulary',
+    icon: Brain,
   },
   {
     href: '/quality',

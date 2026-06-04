@@ -1,4 +1,5 @@
 import type { MarketingMemory, MemorySurface } from './memory'
+import { scorePersonaFit, type MarketingPersona } from './personas'
 
 export interface GeneratedAssetInput {
   title?: string | null
@@ -24,6 +25,7 @@ export interface GeneratedQualityScore {
     channelFit: QualityDimension
     specificity: QualityDimension
     conversionIntent: QualityDimension
+    personaFit?: QualityDimension
   }
   recommendations: string[]
 }
@@ -35,6 +37,7 @@ export function scoreGeneratedAsset(
   surface: MemorySurface,
   input: GeneratedAssetInput,
   memory?: MarketingMemory | null,
+  persona?: MarketingPersona | null,
 ): GeneratedQualityScore {
   const text = compact([input.title, input.headline, input.subject, input.previewText, input.body, input.cta].join(' '))
   const lower = text.toLowerCase()
@@ -45,20 +48,32 @@ export function scoreGeneratedAsset(
   const channelFit = scoreChannelFit(surface, input, text)
   const specificity = scoreSpecificity(lower, memory)
   const conversionIntent = scoreConversionIntent(lower, input.cta)
+  const personaFit = persona ? scorePersonaDimension(text, persona) : undefined
 
-  const dimensions = { clarity, audienceFit, channelFit, specificity, conversionIntent }
-  const overall = round(
+  const dimensions = { clarity, audienceFit, channelFit, specificity, conversionIntent, ...(personaFit ? { personaFit } : {}) }
+  const baseOverall = round(
     clarity.score * 0.22 +
     audienceFit.score * 0.22 +
     channelFit.score * 0.18 +
     specificity.score * 0.18 +
     conversionIntent.score * 0.20,
   )
+  const overall = personaFit ? round(baseOverall * 0.82 + personaFit.score * 0.18) : baseOverall
 
   return {
     overall,
     dimensions,
     recommendations: recommendations(dimensions),
+  }
+}
+
+function scorePersonaDimension(text: string, persona: MarketingPersona): QualityDimension {
+  const fit = scorePersonaFit(text, persona)
+  return {
+    score: fit.score,
+    rationale: fit.misses.length
+      ? `${fit.rationale} Missing ${fit.misses.join(', ')} signal.`
+      : fit.rationale,
   }
 }
 

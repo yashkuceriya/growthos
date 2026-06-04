@@ -69,24 +69,24 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   const supabase = createClient()
 
   async function fetchProjects() {
-    if (hasLocalDevSession()) {
-      setProjects([localProject])
-      setActiveProjectId(LOCAL_DEV_PROJECT_ID)
-      setLoading(false)
-      return
-    }
-
     const { data } = await supabase
       .from('projects')
       .select('*')
       .order('created_at', { ascending: false })
     if (data) {
       setProjects(data)
-      if (!activeProjectId && data.length > 0) {
+      if (data.length > 0) {
         const stored = localStorage.getItem('growthos-active-project')
-        const valid = stored && data.find((p) => p.id === stored)
-        setActiveProjectId(valid ? stored : data[0].id)
+        const currentIsValid = activeProjectId && data.some((p) => p.id === activeProjectId)
+        const storedIsValid = stored && data.some((p) => p.id === stored)
+        if (!currentIsValid) {
+          setActiveProjectId(storedIsValid ? stored : data[0].id)
+        }
       }
+    }
+    if ((!data || data.length === 0) && hasLocalDevSession()) {
+      setProjects([localProject])
+      setActiveProjectId(LOCAL_DEV_PROJECT_ID)
     }
     setLoading(false)
   }
