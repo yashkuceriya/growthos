@@ -3,6 +3,7 @@ import { generateBlogPost } from '@/lib/ai/content/generator'
 import { trackAICost, estimateCost } from '@/lib/cost-tracker'
 import { getMarketingMemory, marketingMemoryPrompt } from '@/lib/marketing/memory'
 import { scoreGeneratedAsset } from '@/lib/marketing/quality'
+import { getPrimaryPersona, personaPrompt } from '@/lib/marketing/personas'
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -26,7 +27,8 @@ export async function POST(request: Request) {
         assetKind: 'blog_post',
       })
     : null
-  const styleContext = memory ? marketingMemoryPrompt(memory, 'blog') : undefined
+  const persona = memory && projectId ? await getPrimaryPersona(supabase, projectId, memory) : null
+  const styleContext = memory ? [marketingMemoryPrompt(memory, 'blog'), personaPrompt(persona)].filter(Boolean).join('\n\n') : undefined
 
   const result = await generateBlogPost({ topic, targetKeyword, audience, tone, outline, wordCount, styleContext })
 
@@ -48,6 +50,6 @@ export async function POST(request: Request) {
       title: result.post.title,
       body: result.post.body_markdown,
       targetKeyword,
-    }, memory),
+    }, memory, persona),
   })
 }

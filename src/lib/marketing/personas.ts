@@ -25,6 +25,11 @@ export interface PersonaFitScore {
   misses: string[]
 }
 
+export type PersonaSupabaseClient = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  from: (table: string) => any
+}
+
 const PERSONA_PRESETS: Array<Omit<MarketingPersona, 'id' | 'projectId' | 'isPrimary'>> = [
   {
     name: 'Founder Operator',
@@ -124,6 +129,40 @@ export function scorePersonaFit(text: string, persona: MarketingPersona): Person
       ? `Matches ${persona.name} language: ${hits.slice(0, 5).join(', ')}.`
       : `Does not clearly speak in ${persona.name} language yet.`,
   }
+}
+
+export async function getPrimaryPersona(
+  supabase: PersonaSupabaseClient,
+  projectId: string,
+  memory: MarketingMemory,
+): Promise<MarketingPersona | null> {
+  try {
+    const { data } = await supabase
+      .from('personas')
+      .select('*')
+      .eq('project_id', projectId)
+      .eq('is_primary', true)
+      .maybeSingle()
+    if (data) return normalizePersonaRow(data as Record<string, unknown>)
+  } catch {
+    // Restored/local databases may not have the personas table yet. In that
+    // case, use inferred personas so generators still get buyer guidance.
+  }
+
+  return inferPersonasFromMemory(memory)[0] ?? null
+}
+
+export function personaPrompt(persona: MarketingPersona | null | undefined): string {
+  if (!persona) return ''
+  return [
+    `PRIMARY PERSONA: ${persona.name}${persona.role ? ` (${persona.role})` : ''}`,
+    persona.description ? `Persona description: ${persona.description}` : null,
+    persona.painPoints.length ? `Persona pains: ${persona.painPoints.join(' | ')}` : null,
+    persona.desiredOutcomes.length ? `Persona desired outcomes: ${persona.desiredOutcomes.join(' | ')}` : null,
+    persona.objections.length ? `Persona objections: ${persona.objections.join(' | ')}` : null,
+    persona.vocabulary.length ? `Persona vocabulary: ${persona.vocabulary.slice(0, 12).join(', ')}` : null,
+    `Persona skepticism: ${persona.skepticismLevel}. ${persona.skepticismLevel === 'high' ? 'Use concrete, sober, practical language and avoid hype.' : 'Stay specific and useful.'}`,
+  ].filter(Boolean).join('\n')
 }
 
 export function normalizePersonaRow(row: Record<string, unknown>): MarketingPersona {

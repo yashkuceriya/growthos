@@ -3,6 +3,7 @@ import { generateEmailCopy } from '@/lib/ai/email/generator'
 import { trackAICost, estimateCost } from '@/lib/cost-tracker'
 import { getMarketingMemory, marketingMemoryPrompt } from '@/lib/marketing/memory'
 import { scoreGeneratedAsset } from '@/lib/marketing/quality'
+import { getPrimaryPersona, personaPrompt } from '@/lib/marketing/personas'
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -27,8 +28,9 @@ export async function POST(request: Request) {
         assetKind: 'email_template',
       })
     : null
+  const persona = memory && projectId ? await getPrimaryPersona(supabase, projectId, memory) : null
   const memoryBlock = memory ? marketingMemoryPrompt(memory, 'email') : ''
-  const styleContext = [memoryBlock, brandVoice].filter(Boolean).join('\n\n').trim() || undefined
+  const styleContext = [memoryBlock, personaPrompt(persona), brandVoice].filter(Boolean).join('\n\n').trim() || undefined
 
   const result = await generateEmailCopy({
     purpose,
@@ -60,6 +62,6 @@ export async function POST(request: Request) {
       subject: result.email.subject,
       previewText: result.email.preview_text,
       body: result.email.body_html,
-    }, memory),
+    }, memory, persona),
   })
 }

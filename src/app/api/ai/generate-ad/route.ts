@@ -4,6 +4,7 @@ import { extractInsights, saveInsights } from '@/lib/ai/ad-studio/insight-extrac
 import { trackAICost, estimateCost } from '@/lib/cost-tracker'
 import { modeBlock } from '@/lib/ai/creative/modes'
 import { getMarketingMemory, marketingMemoryPrompt } from '@/lib/marketing/memory'
+import { getPrimaryPersona, personaPrompt } from '@/lib/marketing/personas'
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -69,11 +70,16 @@ export async function POST(request: Request) {
     projectId,
     assetKind: 'ad_copy',
   })
+  const persona = await getPrimaryPersona(supabase, projectId, memory)
 
   // System-prompt block: brand + blueprint + insights + founder voice +
   // style refs. Append the creative-mode directive so a "funny ad" still
   // gets the funny angle baked into the same prompt.
-  const brandVoice = marketingMemoryPrompt(memory, 'ad_copy') + modeBlock(creativeMode, 'copy')
+  const brandVoice = [
+    marketingMemoryPrompt(memory, 'ad_copy'),
+    personaPrompt(persona),
+    modeBlock(creativeMode, 'copy'),
+  ].filter(Boolean).join('\n\n')
 
   // Ad insights are inside the prompt block via memory, but the iterator
   // also threads them through `insights` so the user message reinforces

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MarketingMemory } from './memory'
-import { inferPersonasFromMemory, scorePersonaFit } from './personas'
+import { getPrimaryPersona, inferPersonasFromMemory, personaPrompt, scorePersonaFit } from './personas'
 
 const memory = {
   project: { id: 'p1', name: 'GrowthOS', website: null, description: null },
@@ -34,5 +34,48 @@ describe('persona intelligence', () => {
     expect(strong.score).toBeGreaterThan(weak.score)
     expect(strong.hits).toContain('launch')
     expect(weak.misses).toContain('desired outcome')
+  })
+
+  it('uses a stored primary persona when available', async () => {
+    const persona = await getPrimaryPersona({
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: {
+                  id: 'persona-1',
+                  project_id: 'p1',
+                  name: 'Technical Founder',
+                  role: 'Founder',
+                  skepticism_level: 'high',
+                  is_primary: true,
+                  pain_points: ['manual launches'],
+                  objections: ['too much setup'],
+                  buying_triggers: [],
+                  desired_outcomes: ['ship faster'],
+                  vocabulary: ['launch', 'ship'],
+                  preferred_channels: ['landing'],
+                },
+              }),
+            }),
+          }),
+        }),
+      }),
+    }, 'p1', memory)
+
+    expect(persona?.name).toBe('Technical Founder')
+    expect(personaPrompt(persona)).toContain('Persona objections: too much setup')
+  })
+
+  it('falls back to inferred primary persona when the table is unavailable', async () => {
+    const persona = await getPrimaryPersona({
+      from: () => {
+        throw new Error('missing table')
+      },
+    }, 'p1', memory)
+
+    expect(persona?.id).toBe('preset-1')
+    expect(persona?.name).toBe('Solo App Founders')
   })
 })

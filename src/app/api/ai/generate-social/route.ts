@@ -4,6 +4,7 @@ import { trackAICost, estimateCost } from '@/lib/cost-tracker'
 import { modeBlock } from '@/lib/ai/creative/modes'
 import { getMarketingMemory, marketingMemoryPrompt } from '@/lib/marketing/memory'
 import { scoreGeneratedAsset } from '@/lib/marketing/quality'
+import { getPrimaryPersona, personaPrompt } from '@/lib/marketing/personas'
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -29,13 +30,14 @@ export async function POST(request: Request) {
         channel: platform,
       })
     : null
+  const persona = memory && projectId ? await getPrimaryPersona(supabase, projectId, memory) : null
 
   // Compose the system-prompt block. Memory provides brand, blueprint,
   // founder voice, and proven style refs in one block. Caller's brandVoice
   // (if any) gets appended for ad-hoc overrides. Creative-mode directive
   // tacked on so "funny" mode still bends the angle.
   const memoryBlock = memory ? marketingMemoryPrompt(memory, 'social_post') : ''
-  const styleContext = [memoryBlock, brandVoice, modeBlock(creativeMode, 'copy')]
+  const styleContext = [memoryBlock, personaPrompt(persona), brandVoice, modeBlock(creativeMode, 'copy')]
     .filter(Boolean)
     .join('\n\n')
     .trim() || undefined
@@ -69,6 +71,6 @@ export async function POST(request: Request) {
     quality: scoreGeneratedAsset('social_post', {
       body: result.post.content,
       hashtags: result.post.hashtags,
-    }, memory),
+    }, memory, persona),
   })
 }
