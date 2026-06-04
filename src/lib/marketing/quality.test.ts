@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { scoreGeneratedAsset } from './quality'
 import type { MarketingMemory } from './memory'
+import type { MarketingPersona } from './personas'
 
 const memory = {
   project: { id: 'p1', name: 'GrowthOS', website: null, description: null },
@@ -72,5 +73,32 @@ describe('scoreGeneratedAsset', () => {
 
     expect(score.dimensions.channelFit.score).toBeGreaterThan(7)
     expect(score.dimensions.conversionIntent.score).toBeGreaterThan(7)
+  })
+
+  it('adds persona fit when a persona is supplied', () => {
+    const persona: MarketingPersona = {
+      id: 'preset-1',
+      projectId: 'p1',
+      name: 'Founder Operator',
+      role: 'Founder',
+      description: 'Runs launches personally and wants practical leverage.',
+      painPoints: ['launches lose momentum'],
+      objections: ['sounds generic'],
+      buyingTriggers: ['new product launch'],
+      desiredOutcomes: ['ship campaigns faster'],
+      vocabulary: ['launch', 'ship', 'sprint', 'leads'],
+      preferredChannels: ['landing'],
+      skepticismLevel: 'high',
+      isPrimary: true,
+    }
+
+    const score = scoreGeneratedAsset('landing_page', {
+      headline: 'Ship your next launch sprint without losing momentum',
+      body: 'Founder operators can track leads, fix campaign gaps, and keep the next launch moving from one workspace.',
+      cta: 'Start launch sprint',
+    }, memory, persona)
+
+    expect(score.dimensions.personaFit?.score).toBeGreaterThan(7)
+    expect(score.recommendations.join(' ')).not.toContain('Persona fit')
   })
 })

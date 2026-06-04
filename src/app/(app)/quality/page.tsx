@@ -108,6 +108,7 @@ export default function QualityPage() {
         id: asset.id,
         channel: asset.channel,
         surface: asset.surface,
+        personaId: personaId === 'baseline' ? undefined : personaId,
       }),
     })
     const body = await res.json().catch(() => ({}))

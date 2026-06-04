@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { checkBudget, budgetExceededResponse } from '@/lib/budget-guard'
 import { getMarketingMemory, marketingMemoryPrompt } from '@/lib/marketing/memory'
 import { scoreGeneratedAsset } from '@/lib/marketing/quality'
+import { inferPersonasFromMemory, normalizePersonaRow, type MarketingPersona } from '@/lib/marketing/personas'
 import { modelFor, modelLabel } from '@/lib/ai/models'
 import { trackFromUsage } from '@/lib/cost-tracker'
 
@@ -19,6 +20,7 @@ interface ImproveRequest {
   id?: string
   channel?: string
   surface?: string
+  personaId?: string
 }
 
 export async function POST(request: Request) {
@@ -31,6 +33,7 @@ export async function POST(request: Request) {
   const id = body.id
   const channel = body.channel
   const surface = body.surface
+  const personaId = body.personaId
   if (!projectId || !id || !channel || !surface) {
     return Response.json({ error: 'projectId, id, channel, and surface required' }, { status: 400 })
   }
@@ -39,11 +42,13 @@ export async function POST(request: Request) {
   if (!budget.ok) return budgetExceededResponse(budget)
 
   const memory = await getMarketingMemory({ supabase, userId: user.id, projectId })
+  const persona = personaId ? await loadPersona(supabase, projectId, personaId, memory) : null
   const original = await loadOriginal(supabase, { id, channel, surface })
   if (!original) return Response.json({ error: 'Asset not found' }, { status: 404 })
 
-  const before = scoreGeneratedAsset(original.scoreSurface, original.scoreInput, memory)
+  const before = scoreGeneratedAsset(original.scoreSurface, original.scoreInput, memory, persona)
   const memoryBlock = marketingMemoryPrompt(memory, original.scoreSurface)
+  const personaBlock = persona ? personaPromptBlock(persona) : ''
   const startedAt = Date.now()
   const model = modelFor('strategic')
   const modelName = modelLabel('strategic')
@@ -53,7 +58,7 @@ export async function POST(request: Request) {
     system: `You are a senior growth copy editor. Rewrite weak marketing assets into sharper, more specific, more conversion-oriented drafts. Keep the same channel and asset format. Do not add fake facts, fake metrics, fake testimonials, or unsupported claims.`,
     messages: [{
       role: 'user',
-      content: `${memoryBlock}
+      content: `${memoryBlock}${personaBlock ? `\n\n${personaBlock}` : ''}
 
 ASSET TYPE: ${original.scoreSurface}
 CHANNEL: ${channel}
@@ -68,7 +73,7 @@ ${original.title}
 ORIGINAL BODY:
 ${original.body}
 
-Rewrite this asset. Keep it ready to use, concise for the channel, and grounded in the product memory.`,
+Rewrite this asset. Keep it ready to use, concise for the channel, grounded in the product memory, and ${persona ? `written for ${persona.name}. Address their pains, desired outcomes, and likely objections without naming the persona unless it would sound natural.` : 'written for the stored audience.'}`,
     }],
   })
 
@@ -80,17 +85,18 @@ Rewrite this asset. Keep it ready to use, concise for the channel, and grounded 
     model: modelName,
     usage: result.usage,
     latencyMs: Date.now() - startedAt,
-    metadata: { id, channel, surface, before: before.overall },
+    metadata: { id, channel, surface, personaId: persona?.id ?? null, before: before.overall },
   })
 
   const improved = result.object
   const afterInput = original.toScoreInput(improved)
-  const after = scoreGeneratedAsset(original.scoreSurface, afterInput, memory)
+  const after = scoreGeneratedAsset(original.scoreSurface, afterInput, memory, persona)
   const error = await saveImproved(supabase, original, improved, after.overall)
   if (error) return Response.json({ error }, { status: 500 })
 
   return Response.json({
     asset: { id, channel, surface, title: improved.title, body: improved.body },
+    persona,
     before,
     after,
   })
@@ -111,6 +117,42 @@ interface OriginalAsset {
   scoreSurface: ScoreSurface
   scoreInput: ScoreInput
   toScoreInput: (asset: Improved) => ScoreInput
+}
+
+async function loadPersona(
+  supabase: Supabase,
+  projectId: string,
+  personaId: string,
+  memory: Awaited<ReturnType<typeof getMarketingMemory>>,
+): Promise<MarketingPersona | null> {
+  if (personaId.startsWith('preset-')) {
+    return inferPersonasFromMemory(memory).find((persona) => persona.id === personaId) ?? null
+  }
+
+  try {
+    const { data } = await supabase
+      .from('personas')
+      .select('*')
+      .eq('project_id', projectId)
+      .eq('id', personaId)
+      .maybeSingle()
+    return data ? normalizePersonaRow(data as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
+}
+
+function personaPromptBlock(persona: MarketingPersona): string {
+  return [
+    `TARGET PERSONA: ${persona.name}${persona.role ? ` (${persona.role})` : ''}`,
+    persona.description ? `Description: ${persona.description}` : null,
+    persona.painPoints.length ? `Pain points: ${persona.painPoints.join(' | ')}` : null,
+    persona.desiredOutcomes.length ? `Desired outcomes: ${persona.desiredOutcomes.join(' | ')}` : null,
+    persona.objections.length ? `Objections to overcome: ${persona.objections.join(' | ')}` : null,
+    persona.buyingTriggers.length ? `Buying triggers: ${persona.buyingTriggers.join(' | ')}` : null,
+    persona.vocabulary.length ? `Use natural vocabulary like: ${persona.vocabulary.slice(0, 12).join(', ')}` : null,
+    `Skepticism level: ${persona.skepticismLevel}. ${persona.skepticismLevel === 'high' ? 'Be concrete, sober, and proof-seeking; avoid hype.' : 'Stay specific and useful.'}`,
+  ].filter(Boolean).join('\n')
 }
 
 async function loadOriginal(
