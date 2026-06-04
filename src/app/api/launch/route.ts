@@ -19,6 +19,7 @@ import { isLaunchChannel, LAUNCH_CHANNELS } from '@/lib/launch/plan'
 import { learningSummaryToPrompt } from '@/lib/campaigns/learning'
 import { scoreGeneratedAsset } from '@/lib/marketing/quality'
 import type { MarketingMemory } from '@/lib/marketing/memory'
+import { getPrimaryPersona } from '@/lib/marketing/personas'
 
 // Channel ids the UI renders — must match keys below
 const ALL_CHANNELS = LAUNCH_CHANNELS
@@ -112,6 +113,9 @@ export async function POST(request: Request) {
     heroImageUrl: (bv.hero_image_url as string) ?? null,
     website: project.website ?? null,
   }
+  const launchMemory = marketingMemoryFromLaunchContext(projectId, ctx)
+  const primaryPersona = await getPrimaryPersona(supabase, projectId, launchMemory)
+  ctx.primaryPersona = primaryPersona
 
   // SSE stream
   const encoder = new TextEncoder()
@@ -157,6 +161,7 @@ export async function POST(request: Request) {
         channels: CHANNELS,
         vertical: classification?.vertical ?? 'other',
         playbook: { kpis: playbook.kpis, launch_tactics: playbook.launch_tactics },
+        persona: primaryPersona ? { id: primaryPersona.id, name: primaryPersona.name, skepticismLevel: primaryPersona.skepticismLevel } : null,
         overrides: {
           channels: overrideChannels !== null,
           goal: overrideGoal !== null,
@@ -222,6 +227,7 @@ export async function POST(request: Request) {
               goal_override: overrideGoal,
               angle_override: overrideAngle,
               channels_override: overrideChannels,
+              persona: primaryPersona,
             },
           }).eq('id', existing.id)
         }
@@ -241,6 +247,7 @@ export async function POST(request: Request) {
             goal_override: overrideGoal,
             angle_override: overrideAngle,
             channels_override: overrideChannels,
+            persona: primaryPersona,
           },
         }).select().single()
         campaignId = campaign?.id ?? null
@@ -350,6 +357,7 @@ export async function POST(request: Request) {
             analytics_plan: analyticsPlan,
             director_review: review,
             insights,
+            persona: primaryPersona,
             finished_at: new Date().toISOString(),
           },
         }).eq('id', campaignId)
@@ -391,6 +399,7 @@ async function runChannel(
 ): Promise<string> {
   const brandContext = brandContextFromCtx(ctx)
   const qualityMemory = marketingMemoryFromLaunchContext(projectId, ctx)
+  const persona = ctx.primaryPersona ?? null
 
   switch (channel) {
     case 'meta': {
@@ -408,7 +417,7 @@ async function runChannel(
             headline: ad.headline,
             body: ad.primary_text,
             cta: ad.cta_button,
-          }, qualityMemory)
+          }, qualityMemory, persona)
           const { data: adCopy } = await supabase.from('ad_copies').insert({
             user_id: userId, brief_id: brief.id, iteration_number: 1,
             primary_text: ad.primary_text, headline: ad.headline,
@@ -446,7 +455,7 @@ async function runChannel(
           const quality = scoreGeneratedAsset('ad_copy', {
             headline: v.headline,
             body: v.text,
-          }, qualityMemory)
+          }, qualityMemory, persona)
           const { data: adCopy } = await supabase.from('ad_copies').insert({
             user_id: userId, brief_id: brief.id, iteration_number: 1,
             primary_text: v.text, headline: v.headline,
@@ -473,7 +482,7 @@ async function runChannel(
         const quality = scoreGeneratedAsset('social_post', {
           body: content,
           hashtags: p.hashtags,
-        }, qualityMemory)
+        }, qualityMemory, persona)
         await supabase.from('social_posts').insert({
           user_id: userId, project_id: projectId, campaign_id: campaignId, platform: 'linkedin',
           content,
@@ -491,7 +500,7 @@ async function runChannel(
           headline: reel.hook,
           body: content,
           hashtags: reel.hashtags,
-        }, qualityMemory)
+        }, qualityMemory, persona)
         await supabase.from('social_posts').insert({
           user_id: userId, project_id: projectId, campaign_id: campaignId, platform: 'tiktok',
           content,
@@ -506,7 +515,7 @@ async function runChannel(
       const threadContent = thread.thread.sort((a, b) => a.position - b.position).map((t, i) => `[${i + 1}/${thread.thread.length}] ${t.text}`).join('\n\n')
       const threadQuality = scoreGeneratedAsset('social_post', {
         body: threadContent,
-      }, qualityMemory)
+      }, qualityMemory, persona)
       await supabase.from('social_posts').insert({
         user_id: userId, project_id: projectId, campaign_id: campaignId, platform: 'twitter',
         content: threadContent,
@@ -516,7 +525,7 @@ async function runChannel(
       for (const t of thread.standalone_tweets) {
         const quality = scoreGeneratedAsset('social_post', {
           body: t.text,
-        }, qualityMemory)
+        }, qualityMemory, persona)
         await supabase.from('social_posts').insert({
           user_id: userId, project_id: projectId, campaign_id: campaignId, platform: 'twitter',
           content: t.text, status: 'draft', ai_generated: true,
@@ -533,7 +542,7 @@ async function runChannel(
         const quality = scoreGeneratedAsset('social_post', {
           title: p.title,
           body: content,
-        }, qualityMemory)
+        }, qualityMemory, persona)
         await supabase.from('social_posts').insert({
           user_id: userId, project_id: projectId, campaign_id: campaignId, platform: 'reddit',
           content,
@@ -557,7 +566,7 @@ async function runChannel(
           previewText: email.preview_text,
           body: email.body_html,
           cta: email.cta_text,
-        }, qualityMemory)
+        }, qualityMemory, persona)
         const { data: tmpl } = await supabase.from('email_templates').insert({
           user_id: userId, project_id: projectId,
           name: `Welcome ${idx + 1}: ${email.subject.slice(0, 40)}`,
@@ -581,7 +590,7 @@ async function runChannel(
         title: post.title,
         body: post.body_markdown,
         targetKeyword: post.target_keywords[0],
-      }, qualityMemory)
+      }, qualityMemory, persona)
       await supabase.from('content_pieces').insert({
         user_id: userId, project_id: projectId, campaign_id: campaignId,
         title: post.title, slug: post.slug,
@@ -602,7 +611,7 @@ async function runChannel(
         headline: page.headline,
         body: bodyText,
         cta: page.cta_text,
-      }, qualityMemory)
+      }, qualityMemory, persona)
       await supabase.from('landing_pages').insert({
         user_id: userId, project_id: projectId, campaign_id: campaignId,
         name: `${ctx.productName} Launch Page`,

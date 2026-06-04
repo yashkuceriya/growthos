@@ -3,6 +3,8 @@ import { openrouter } from '@/lib/ai/openrouter'
 import { modelFor, modelLabel, MODEL_GEMINI_PRODUCTION } from '@/lib/ai/models'
 import { PLATFORM_SPECS, pickSubreddits } from './specs'
 import { trackGen, type TrackOpts } from './utils'
+import type { MarketingPersona } from '@/lib/marketing/personas'
+import { personaPrompt } from '@/lib/marketing/personas'
 import {
   MetaAdSchema, LinkedInAssetsSchema, TikTokAssetsSchema, TwitterThreadSchema,
   RedditPostsSchema, EmailSequenceSchema, BlogPostSchema, LandingPageSchema,
@@ -27,6 +29,7 @@ export interface LaunchContext {
   // Filled when re-launching an existing campaign that has a persisted
   // learning_summary in campaign metadata.
   priorCampaignLearnings?: string | null
+  primaryPersona?: MarketingPersona | null
 }
 
 export function priorLearningsBlock(ctx: LaunchContext): string {
@@ -38,6 +41,11 @@ PRIOR CAMPAIGN LEARNINGS (same campaign — amplify what worked, avoid repeating
 ${t}`
 }
 
+export function launchPersonaBlock(ctx: LaunchContext): string {
+  const block = personaPrompt(ctx.primaryPersona)
+  return block ? `\n\n${block}` : ''
+}
+
 function contextBlock(ctx: LaunchContext) {
   return `PRODUCT: ${ctx.productName}
 TAGLINE: ${ctx.tagline}
@@ -47,7 +55,7 @@ FEATURES: ${ctx.features.join(' · ')}
 DIFFERENTIATORS: ${ctx.differentiators.join(' · ')}
 PRICING: ${ctx.pricing}
 TONE: ${ctx.tone}
-WEBSITE: ${ctx.website ?? ''}${priorLearningsBlock(ctx)}`
+WEBSITE: ${ctx.website ?? ''}${launchPersonaBlock(ctx)}${priorLearningsBlock(ctx)}`
 }
 
 export async function genMetaAd(ctx: LaunchContext, track?: TrackOpts) {
