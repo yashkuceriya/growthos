@@ -19,7 +19,7 @@ import { isLaunchChannel, LAUNCH_CHANNELS } from '@/lib/launch/plan'
 import { learningSummaryToPrompt } from '@/lib/campaigns/learning'
 import { scoreGeneratedAsset } from '@/lib/marketing/quality'
 import type { MarketingMemory } from '@/lib/marketing/memory'
-import { getPrimaryPersona } from '@/lib/marketing/personas'
+import { getPersonaById } from '@/lib/marketing/personas'
 
 // Channel ids the UI renders — must match keys below
 const ALL_CHANNELS = LAUNCH_CHANNELS
@@ -34,6 +34,7 @@ interface LaunchRequestBody {
   goal?: unknown
   angle?: unknown
   campaignId?: unknown
+  personaId?: unknown
 }
 
 export async function POST(request: Request) {
@@ -64,6 +65,7 @@ export async function POST(request: Request) {
   const overrideGoal = typeof body.goal === 'string' && body.goal.trim().length > 0 ? body.goal.trim() : null
   const overrideAngle = typeof body.angle === 'string' && body.angle.trim().length > 0 ? body.angle.trim() : null
   const reuseCampaignId = typeof body.campaignId === 'string' && body.campaignId.trim().length > 0 ? body.campaignId.trim() : null
+  const overridePersonaId = typeof body.personaId === 'string' && body.personaId.trim().length > 0 ? body.personaId.trim() : null
 
   const { data: project } = await supabase
     .from('projects')
@@ -114,8 +116,8 @@ export async function POST(request: Request) {
     website: project.website ?? null,
   }
   const launchMemory = marketingMemoryFromLaunchContext(projectId, ctx)
-  const primaryPersona = await getPrimaryPersona(supabase, projectId, launchMemory)
-  ctx.primaryPersona = primaryPersona
+  const launchPersona = await getPersonaById(supabase, projectId, overridePersonaId, launchMemory)
+  ctx.primaryPersona = launchPersona
 
   // SSE stream
   const encoder = new TextEncoder()
@@ -161,12 +163,13 @@ export async function POST(request: Request) {
         channels: CHANNELS,
         vertical: classification?.vertical ?? 'other',
         playbook: { kpis: playbook.kpis, launch_tactics: playbook.launch_tactics },
-        persona: primaryPersona ? { id: primaryPersona.id, name: primaryPersona.name, skepticismLevel: primaryPersona.skepticismLevel } : null,
+        persona: launchPersona ? { id: launchPersona.id, name: launchPersona.name, skepticismLevel: launchPersona.skepticismLevel } : null,
         overrides: {
           channels: overrideChannels !== null,
           goal: overrideGoal !== null,
           angle: overrideAngle !== null,
           campaign_reused: reuseCampaignId !== null,
+          persona: overridePersonaId !== null,
         },
       })
 
@@ -227,7 +230,8 @@ export async function POST(request: Request) {
               goal_override: overrideGoal,
               angle_override: overrideAngle,
               channels_override: overrideChannels,
-              persona: primaryPersona,
+              persona: launchPersona,
+              persona_override_id: overridePersonaId,
             },
           }).eq('id', existing.id)
         }
@@ -247,7 +251,8 @@ export async function POST(request: Request) {
             goal_override: overrideGoal,
             angle_override: overrideAngle,
             channels_override: overrideChannels,
-            persona: primaryPersona,
+            persona: launchPersona,
+            persona_override_id: overridePersonaId,
           },
         }).select().single()
         campaignId = campaign?.id ?? null
@@ -357,7 +362,8 @@ export async function POST(request: Request) {
             analytics_plan: analyticsPlan,
             director_review: review,
             insights,
-            persona: primaryPersona,
+            persona: launchPersona,
+            persona_override_id: overridePersonaId,
             finished_at: new Date().toISOString(),
           },
         }).eq('id', campaignId)

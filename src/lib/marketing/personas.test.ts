@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MarketingMemory } from './memory'
-import { getPrimaryPersona, inferPersonasFromMemory, personaPrompt, scorePersonaFit } from './personas'
+import { getPersonaById, getPrimaryPersona, inferPersonasFromMemory, personaPrompt, scorePersonaFit } from './personas'
 
 const memory = {
   project: { id: 'p1', name: 'GrowthOS', website: null, description: null },
@@ -77,5 +77,48 @@ describe('persona intelligence', () => {
 
     expect(persona?.id).toBe('preset-1')
     expect(persona?.name).toBe('Solo App Founders')
+  })
+
+  it('resolves an inferred preset persona by id', async () => {
+    const persona = await getPersonaById({
+      from: () => {
+        throw new Error('missing table')
+      },
+    }, 'p1', 'preset-2', memory)
+
+    expect(persona?.id).toBe('preset-2')
+    expect(persona?.name).toBe('Growth Marketer')
+  })
+
+  it('resolves a stored persona by id', async () => {
+    const persona = await getPersonaById({
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: {
+                  id: 'persona-growth',
+                  project_id: 'p1',
+                  name: 'Lifecycle Lead',
+                  role: 'Growth',
+                  skepticism_level: 'medium',
+                  is_primary: false,
+                  pain_points: ['slow creative iteration'],
+                  objections: ['generic copy'],
+                  buying_triggers: [],
+                  desired_outcomes: ['more experiments'],
+                  vocabulary: ['experiment', 'variant'],
+                  preferred_channels: ['email'],
+                },
+              }),
+            }),
+          }),
+        }),
+      }),
+    }, 'p1', 'persona-growth', memory)
+
+    expect(persona?.name).toBe('Lifecycle Lead')
+    expect(persona?.isPrimary).toBe(false)
   })
 })

@@ -123,7 +123,8 @@ export default function LaunchPage() {
   const [selectedChannels, setSelectedChannels] = useState<Set<ChannelKey>>(new Set())
   const [goal, setGoal] = useState<string>('')
   const [angle, setAngle] = useState<string>('')
-  const [primaryPersona, setPrimaryPersona] = useState<MarketingPersona | null>(null)
+  const [personas, setPersonas] = useState<MarketingPersona[]>([])
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string>('')
   const [personaLoading, setPersonaLoading] = useState(false)
 
   // Agent outputs
@@ -222,23 +223,28 @@ export default function LaunchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProject?.id])
 
-  async function loadPrimaryPersona(projectId: string) {
+  async function loadPersonas(projectId: string) {
     setPersonaLoading(true)
     try {
       const res = await fetch(`/api/personas?project_id=${encodeURIComponent(projectId)}`)
       const body = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(body.error ?? 'Could not load persona')
-      const personas = (body.personas ?? []) as MarketingPersona[]
-      setPrimaryPersona(personas.find((persona) => persona.isPrimary) ?? personas[0] ?? null)
+      const nextPersonas = (body.personas ?? []) as MarketingPersona[]
+      setPersonas(nextPersonas)
+      setSelectedPersonaId((current) => {
+        if (current && nextPersonas.some((persona) => persona.id === current)) return current
+        return nextPersonas.find((persona) => persona.isPrimary)?.id ?? nextPersonas[0]?.id ?? ''
+      })
     } catch {
-      setPrimaryPersona(null)
+      setPersonas([])
+      setSelectedPersonaId('')
     } finally {
       setPersonaLoading(false)
     }
   }
 
   useEffect(() => {
-    if (activeProject) void loadPrimaryPersona(activeProject.id)
+    if (activeProject) void loadPersonas(activeProject.id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProject?.id])
 
@@ -277,6 +283,7 @@ export default function LaunchPage() {
           channels: Array.from(selectedChannels),
           goal: goal.trim() || undefined,
           angle: angle.trim() || undefined,
+          personaId: selectedPersonaId || undefined,
           campaignId: reuseCampaignId ?? undefined,
         }),
       })
@@ -335,6 +342,7 @@ export default function LaunchPage() {
 
   const readyCount = Object.values(states).filter((s) => s.status === 'ready').length
   const failedCount = Object.values(states).filter((s) => s.status === 'failed').length
+  const selectedPersona = personas.find((persona) => persona.id === selectedPersonaId) ?? personas[0] ?? null
 
   return (
     <PageShell>
@@ -390,7 +398,13 @@ export default function LaunchPage() {
           goal/angle if they want to steer the launch away from defaults. */}
       {hasBrandVoice && (
         <>
-        <PrimaryPersonaPanel persona={primaryPersona} loading={personaLoading} />
+        <PrimaryPersonaPanel
+          personas={personas}
+          selectedPersonaId={selectedPersonaId}
+          persona={selectedPersona}
+          loading={personaLoading}
+          onChangePersona={setSelectedPersonaId}
+        />
         <PlanPreview
           plan={plan}
           loading={planLoading}
@@ -748,7 +762,19 @@ export default function LaunchPage() {
   )
 }
 
-function PrimaryPersonaPanel({ persona, loading }: { persona: MarketingPersona | null; loading: boolean }) {
+function PrimaryPersonaPanel({
+  personas,
+  selectedPersonaId,
+  persona,
+  loading,
+  onChangePersona,
+}: {
+  personas: MarketingPersona[]
+  selectedPersonaId: string
+  persona: MarketingPersona | null
+  loading: boolean
+  onChangePersona: (id: string) => void
+}) {
   return (
     <div className="mb-4 rounded-md border border-slate-800 bg-slate-900/45 p-4">
       <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
@@ -768,12 +794,31 @@ function PrimaryPersonaPanel({ persona, loading }: { persona: MarketingPersona |
             </p>
           </div>
         </div>
-        <a
-          href="/personas"
-          className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-800"
-        >
-          Manage Personas
-        </a>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          {personas.length > 0 && (
+            <label className="sr-only" htmlFor="launch-persona">Launch persona</label>
+          )}
+          {personas.length > 0 && (
+            <select
+              id="launch-persona"
+              value={selectedPersonaId}
+              onChange={(e) => onChangePersona(e.target.value)}
+              className="min-w-52 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-100 focus:border-emerald-500/60 focus:outline-none"
+            >
+              {personas.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}{option.role ? ` · ${option.role}` : ''}{option.isPrimary ? ' · Primary' : ''}
+                </option>
+              ))}
+            </select>
+          )}
+          <a
+            href="/personas"
+            className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-800"
+          >
+            Manage Personas
+          </a>
+        </div>
       </div>
 
       {persona && (

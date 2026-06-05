@@ -152,6 +152,34 @@ export async function getPrimaryPersona(
   return inferPersonasFromMemory(memory)[0] ?? null
 }
 
+export async function getPersonaById(
+  supabase: PersonaSupabaseClient,
+  projectId: string,
+  personaId: string | null | undefined,
+  memory: MarketingMemory,
+): Promise<MarketingPersona | null> {
+  if (!personaId) return getPrimaryPersona(supabase, projectId, memory)
+
+  if (personaId.startsWith('preset-')) {
+    return inferPersonasFromMemory(memory).find((persona) => persona.id === personaId)
+      ?? getPrimaryPersona(supabase, projectId, memory)
+  }
+
+  try {
+    const { data } = await supabase
+      .from('personas')
+      .select('*')
+      .eq('project_id', projectId)
+      .eq('id', personaId)
+      .maybeSingle()
+    if (data) return normalizePersonaRow(data as Record<string, unknown>)
+  } catch {
+    // Restored/local databases may not have the personas table yet.
+  }
+
+  return getPrimaryPersona(supabase, projectId, memory)
+}
+
 export function personaPrompt(persona: MarketingPersona | null | undefined): string {
   if (!persona) return ''
   return [
