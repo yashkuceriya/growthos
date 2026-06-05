@@ -88,6 +88,11 @@ export interface LearningSummary {
   bestAsset: BestAsset | null
   strongestHook: string | null
   recommendedNext: string[]
+  decisionLoop: {
+    doNow: string[]
+    stopDoing: string[]
+    testNext: string[]
+  }
   reusableStyleNotes: string[]
   inputCounts: {
     metrics: number
@@ -292,15 +297,50 @@ function pickReusableStyleNotes(inputs: LearningSummaryInputs): string[] {
   return notes.slice(0, 5)
 }
 
+function buildDecisionLoop(
+  inputs: LearningSummaryInputs,
+  best: BestChannel | null,
+  worst: BestChannel | null,
+  bestAsset: BestAsset | null,
+  strongestHook: string | null,
+  recommendedNext: string[],
+): LearningSummary['decisionLoop'] {
+  const doNow: string[] = []
+  const stopDoing: string[] = []
+  const testNext: string[] = []
+
+  if (best) doNow.push(`Shift the next launch toward ${best.channel}; ${best.reason.toLowerCase()}`)
+  if (strongestHook) doNow.push(`Reuse this hook family: ${strongestHook}`)
+  if (bestAsset) doNow.push(`Use ${bestAsset.label} as the creative reference for the next asset batch.`)
+
+  if (worst) stopDoing.push(`Pause or rewrite ${worst.channel}; ${worst.reason.toLowerCase()}`)
+  if (inputs.ads.some((ad) => ad.status === 'generated')) {
+    stopDoing.push('Do not launch generated ad copy until it passes review or is promoted as an experiment.')
+  }
+
+  for (const item of recommendedNext) testNext.push(item)
+  if (testNext.length === 0) testNext.push('Run a narrow hook test with one owned channel and one social channel before widening spend.')
+
+  return {
+    doNow: uniqueStrings(doNow).slice(0, 3),
+    stopDoing: uniqueStrings(stopDoing).slice(0, 3),
+    testNext: uniqueStrings(testNext).slice(0, 4),
+  }
+}
+
 export function summarizeCampaign(inputs: LearningSummaryInputs): LearningSummary {
   const { best, worst } = pickBestChannel(inputs.metrics)
+  const bestAsset = pickBestAsset(inputs)
+  const strongestHook = pickStrongestHook(inputs)
+  const recommendedNext = pickRecommendedNext(inputs, best, worst)
   return {
     generatedAt: new Date().toISOString(),
     bestChannel: best,
     worstChannel: worst,
-    bestAsset: pickBestAsset(inputs),
-    strongestHook: pickStrongestHook(inputs),
-    recommendedNext: pickRecommendedNext(inputs, best, worst),
+    bestAsset,
+    strongestHook,
+    recommendedNext,
+    decisionLoop: buildDecisionLoop(inputs, best, worst, bestAsset, strongestHook, recommendedNext),
     reusableStyleNotes: pickReusableStyleNotes(inputs),
     inputCounts: {
       metrics: inputs.metrics.length,
@@ -337,10 +377,22 @@ export function learningSummaryToPrompt(summary: unknown): string | null {
     const recs = s.recommendedNext.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).slice(0, 5)
     if (recs.length) lines.push(`Suggested next experiments: ${recs.join(' | ')}`)
   }
+  if (s.decisionLoop && typeof s.decisionLoop === 'object') {
+    const doNow = Array.isArray(s.decisionLoop.doNow) ? s.decisionLoop.doNow.filter((x): x is string => typeof x === 'string').slice(0, 3) : []
+    const stopDoing = Array.isArray(s.decisionLoop.stopDoing) ? s.decisionLoop.stopDoing.filter((x): x is string => typeof x === 'string').slice(0, 3) : []
+    const testNext = Array.isArray(s.decisionLoop.testNext) ? s.decisionLoop.testNext.filter((x): x is string => typeof x === 'string').slice(0, 3) : []
+    if (doNow.length) lines.push(`Do now: ${doNow.join(' | ')}`)
+    if (stopDoing.length) lines.push(`Stop doing: ${stopDoing.join(' | ')}`)
+    if (testNext.length) lines.push(`Test next: ${testNext.join(' | ')}`)
+  }
   if (Array.isArray(s.reusableStyleNotes)) {
     const notes = s.reusableStyleNotes.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).slice(0, 5)
     if (notes.length) lines.push(`Reusable style notes: ${notes.join(' · ')}`)
   }
   if (lines.length === 0) return null
   return lines.join('\n')
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return values.map((value) => value.trim()).filter((value, index, arr) => value && arr.indexOf(value) === index)
 }

@@ -20,6 +20,11 @@ describe('summarizeCampaign', () => {
     expect(s.bestAsset).toBeNull()
     expect(s.strongestHook).toBeNull()
     expect(s.recommendedNext).toEqual([])
+    expect(s.decisionLoop).toEqual({
+      doNow: [],
+      stopDoing: [],
+      testNext: ['Run a narrow hook test with one owned channel and one social channel before widening spend.'],
+    })
     expect(s.inputCounts).toEqual({ metrics: 0, ads: 0, social: 0, email: 0 })
   })
 
@@ -105,6 +110,20 @@ describe('summarizeCampaign', () => {
     const recs = s.recommendedNext.join(' | ')
     expect(recs).toMatch(/double down on meta/i)
     expect(recs).toMatch(/cut or rework twitter/i)
+    expect(s.decisionLoop.doNow.join(' ')).toMatch(/meta/i)
+    expect(s.decisionLoop.stopDoing.join(' ')).toMatch(/twitter/i)
+    expect(s.decisionLoop.testNext.join(' ')).toMatch(/double down on meta/i)
+  })
+
+  it('turns hook and best asset into do-now guidance', () => {
+    const s = summarizeCampaign(baseInputs({
+      ads: [
+        { id: 'a1', status: 'human_approved', weighted_average: 8.5, headline: 'Ship campaigns before momentum dies', primary_text: 'x', is_best: true },
+      ],
+    }))
+
+    expect(s.decisionLoop.doNow.join(' | ')).toMatch(/Ship campaigns/i)
+    expect(s.decisionLoop.doNow.join(' | ')).toMatch(/creative reference/i)
   })
 
   it('appends a winners-not-promoted nudge when social/email exist but none are flagged', () => {
@@ -129,12 +148,19 @@ describe('summarizeCampaign', () => {
       strongestHook: 'Save 5h/week',
       bestAsset: { kind: 'ad', id: 'x', label: 'Winning headline', detail: 'd', score: 9 },
       recommendedNext: ['Try LinkedIn', 'Cut twitter spend'],
+      decisionLoop: {
+        doNow: ['Use the winning headline'],
+        stopDoing: ['Pause twitter'],
+        testNext: ['Try LinkedIn'],
+      },
       reusableStyleNotes: ['Tone: direct'],
     })
     expect(text).toContain('Best channel: meta')
     expect(text).toContain('Underperforming channel: twitter')
     expect(text).toContain('Save 5h/week')
     expect(text).toContain('Try LinkedIn')
+    expect(text).toContain('Do now: Use the winning headline')
+    expect(text).toContain('Stop doing: Pause twitter')
     expect(text).toContain('Tone: direct')
   })
 

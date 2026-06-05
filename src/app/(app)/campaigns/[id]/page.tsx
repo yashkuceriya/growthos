@@ -62,6 +62,19 @@ interface AssetsResponse {
   projectEmails: Array<{ id: string; title: string; subject: string; category: string | null; is_winner: boolean; created_at: string | null }>
 }
 
+interface CampaignPersonaMeta {
+  id: string | null
+  name: string
+  role: string | null
+  skepticismLevel: string | null
+}
+
+interface PersonaLearningMeta {
+  personaId: string | null
+  personaName: string | null
+  insightSignal: string | null
+}
+
 const KIND_LABELS: Record<AssetKind, string> = {
   ad: 'Ads',
   social_post: 'Social',
@@ -143,6 +156,8 @@ export default function CampaignDetailPage() {
   const analyticsPlan = (meta as { analytics_plan?: unknown }).analytics_plan
   const directorReview = (meta as { director_review?: unknown }).director_review
   const insights = (meta as { insights?: unknown }).insights
+  const campaignPersona = readCampaignPersona(meta)
+  const personaLearning = readPersonaLearning(meta)
 
   return (
     <PageShell>
@@ -207,6 +222,8 @@ export default function CampaignDetailPage() {
         <NextBestActionPanel projectId={campaign.project_id} campaignId={campaign.id} title="Next best action · this campaign" />
         <LaunchScheduleStrip assets={boardAssets} />
       </div>
+
+      <PersonaLearningCard persona={campaignPersona} learning={personaLearning} />
 
       {/* Unified asset board — single tabbed view across every asset type
           attached to the campaign. Stat cards above act as filter chips. */}
@@ -331,6 +348,80 @@ export default function CampaignDetailPage() {
       </SectionPanel>
     </PageShell>
   )
+}
+
+function PersonaLearningCard({ persona, learning }: { persona: CampaignPersonaMeta | null; learning: PersonaLearningMeta | null }) {
+  return (
+    <SectionPanel
+      className="mb-4 border-emerald-500/25"
+      title={
+        <span className="flex items-center gap-2">
+          <Users className="h-3.5 w-3.5 text-emerald-300" />
+          Persona Learning
+        </span>
+      }
+    >
+      <div className="grid gap-3 md:grid-cols-3">
+        <div>
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Target buyer</div>
+          <p className="text-sm font-semibold text-slate-100">
+            {persona?.name ?? learning?.personaName ?? 'Unassigned persona'}
+          </p>
+          {persona?.role && <p className="mt-0.5 text-xs text-slate-500">{persona.role}</p>}
+        </div>
+        <div>
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Skepticism</div>
+          <StatusPill tone={persona?.skepticismLevel === 'high' ? 'warn' : 'info'}>
+            {persona?.skepticismLevel ?? 'unknown'}
+          </StatusPill>
+        </div>
+        <div>
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Reusable signal</div>
+          <p className="line-clamp-2 text-xs leading-5 text-slate-300">
+            {learning?.insightSignal ?? 'No persona-specific insight captured yet. Re-launch after metrics or review to build this memory.'}
+          </p>
+        </div>
+      </div>
+    </SectionPanel>
+  )
+}
+
+function readCampaignPersona(meta: Record<string, unknown>): CampaignPersonaMeta | null {
+  const raw = meta.persona
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const record = raw as Record<string, unknown>
+  const name = typeof record.name === 'string' ? record.name : null
+  if (!name) return null
+  return {
+    id: typeof record.id === 'string' ? record.id : null,
+    name,
+    role: typeof record.role === 'string' ? record.role : null,
+    skepticismLevel: typeof record.skepticismLevel === 'string'
+      ? record.skepticismLevel
+      : typeof record.skepticism_level === 'string' ? record.skepticism_level : null,
+  }
+}
+
+function readPersonaLearning(meta: Record<string, unknown>): PersonaLearningMeta | null {
+  const raw = meta.persona_learning
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const record = raw as Record<string, unknown>
+  const insights = record.insights && typeof record.insights === 'object' && !Array.isArray(record.insights)
+    ? record.insights as Record<string, unknown>
+    : null
+  const signal = firstString(insights?.winning_hooks)
+    ?? firstString(insights?.themes_that_resonate)
+    ?? firstString(insights?.next_experiments)
+    ?? null
+  return {
+    personaId: typeof record.persona_id === 'string' ? record.persona_id : null,
+    personaName: typeof record.persona_name === 'string' ? record.persona_name : null,
+    insightSignal: signal,
+  }
+}
+
+function firstString(value: unknown): string | null {
+  return Array.isArray(value) ? value.find((item): item is string => typeof item === 'string' && item.trim().length > 0) ?? null : null
 }
 
 function AssetRow({ asset: a, campaignSlug, projectWebsite }: {
@@ -510,4 +601,3 @@ function StatCard({
   if (onClick) return <button type="button" onClick={onClick} className={className}>{content}</button>
   return <div className={className}>{content}</div>
 }
-

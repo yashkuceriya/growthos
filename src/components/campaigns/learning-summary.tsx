@@ -50,6 +50,11 @@ interface LearningSummary {
   bestAsset: LearningAsset | null
   strongestHook: string | null
   recommendedNext: string[]
+  decisionLoop: {
+    doNow: string[]
+    stopDoing: string[]
+    testNext: string[]
+  }
   reusableStyleNotes: string[]
   inputCounts: { metrics: number; ads: number; social: number; email: number }
 }
@@ -169,6 +174,18 @@ export function LearningSummaryPanel({ campaignId }: Props) {
             </div>
           )}
 
+          <div>
+            <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              <ListChecks className="h-3.5 w-3.5" />
+              Do / Stop / Test
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <DecisionList label="Do now" tone="success" items={summary.decisionLoop?.doNow ?? []} fallback="No winning move yet." />
+              <DecisionList label="Stop doing" tone="warn" items={summary.decisionLoop?.stopDoing ?? []} fallback="No clear cut signal yet." />
+              <DecisionList label="Test next" tone="info" items={summary.decisionLoop?.testNext ?? []} fallback="Add metrics to unlock next tests." />
+            </div>
+          </div>
+
           {summary.recommendedNext.length > 0 && (
             <div>
               <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
@@ -206,6 +223,36 @@ export function LearningSummaryPanel({ campaignId }: Props) {
         </div>
       )}
     </SectionPanel>
+  )
+}
+
+function DecisionList({
+  label,
+  tone,
+  items,
+  fallback,
+}: {
+  label: string
+  tone: 'success' | 'warn' | 'info'
+  items: string[]
+  fallback: string
+}) {
+  return (
+    <div className="rounded-md border border-slate-800 bg-slate-900/50 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</span>
+        <StatusPill tone={tone}>{items.length}</StatusPill>
+      </div>
+      {items.length ? (
+        <ul className="space-y-1.5">
+          {items.map((item, i) => (
+            <li key={i} className="text-xs leading-5 text-slate-300">{item}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs leading-5 text-slate-500">{fallback}</p>
+      )}
+    </div>
   )
 }
 
