@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import type { ReactNode } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useProject } from '@/hooks/use-project'
 import { createClient } from '@/lib/supabase/client'
@@ -11,7 +12,7 @@ import { StatusPill } from '@/components/ui/status-pill'
 import {
   Rocket, Loader2, CheckCircle2, AlertCircle, ExternalLink, Copy,
   Mail, Music, Search, Users, Globe, FileText, MessageCircle, Briefcase,
-  X, Clock, Sparkles, Target, Compass, RefreshCw, Brain,
+  X, Clock, Sparkles, Target, Compass, RefreshCw, Brain, History, TrendingUp, TrendingDown, ListChecks,
 } from 'lucide-react'
 // Search icon used in SEO panel; keep explicit import above.
 import { cn } from '@/lib/utils'
@@ -115,6 +116,23 @@ interface LaunchPlan {
   source: 'classification' | 'fallback'
 }
 
+interface LearningChannel {
+  channel: string
+  reason: string
+}
+
+interface LearningSummary {
+  bestChannel: LearningChannel | null
+  worstChannel: LearningChannel | null
+  strongestHook: string | null
+  recommendedNext: string[]
+  decisionLoop?: {
+    doNow: string[]
+    stopDoing: string[]
+    testNext: string[]
+  }
+}
+
 export default function LaunchPage() {
   const { activeProject } = useProject()
   const searchParams = useSearchParams()
@@ -146,6 +164,9 @@ export default function LaunchPage() {
   const [personas, setPersonas] = useState<MarketingPersona[]>([])
   const [selectedPersonaId, setSelectedPersonaId] = useState<string>('')
   const [personaLoading, setPersonaLoading] = useState(false)
+  const [priorLearning, setPriorLearning] = useState<LearningSummary | null>(null)
+  const [priorLearningLoading, setPriorLearningLoading] = useState(false)
+  const [priorLearningError, setPriorLearningError] = useState<string | null>(null)
 
   // Agent outputs
   type AgentKey = 'cmo' | 'seo' | 'director' | 'analytics'
@@ -274,6 +295,30 @@ export default function LaunchPage() {
     if (activeProject) void loadPersonas(activeProject.id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProject?.id])
+
+  async function loadPriorLearning(campaignId: string) {
+    setPriorLearningLoading(true)
+    setPriorLearningError(null)
+    try {
+      const res = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/learnings`)
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.error ?? `Learning request failed: ${res.status}`)
+      setPriorLearning((body.summary ?? null) as LearningSummary | null)
+    } catch (err) {
+      setPriorLearning(null)
+      setPriorLearningError(err instanceof Error ? err.message : 'Could not load prior learnings')
+    } finally {
+      setPriorLearningLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (reuseCampaignId) void loadPriorLearning(reuseCampaignId)
+    else {
+      setPriorLearning(null)
+      setPriorLearningError(null)
+    }
+  }, [reuseCampaignId])
 
   function toggleChannel(channel: ChannelKey) {
     setSelectedChannels((prev) => {
@@ -432,6 +477,15 @@ export default function LaunchPage() {
           loading={personaLoading}
           onChangePersona={setSelectedPersonaId}
         />
+        {reuseCampaignId && (
+          <PriorLearningPanel
+            campaignId={reuseCampaignId}
+            summary={priorLearning}
+            loading={priorLearningLoading}
+            error={priorLearningError}
+            onReload={() => loadPriorLearning(reuseCampaignId)}
+          />
+        )}
         <PlanPreview
           plan={plan}
           loading={planLoading}
@@ -866,6 +920,114 @@ function PersonaSnippet({ label, items }: { label: string; items: string[] }) {
       <p className="line-clamp-2 text-xs leading-5 text-slate-300">
         {items.length ? items.slice(0, 3).join(' | ') : 'Not defined yet'}
       </p>
+    </div>
+  )
+}
+
+function PriorLearningPanel({
+  campaignId,
+  summary,
+  loading,
+  error,
+  onReload,
+}: {
+  campaignId: string
+  summary: LearningSummary | null
+  loading: boolean
+  error: string | null
+  onReload: () => void
+}) {
+  const doNow = summary?.decisionLoop?.doNow ?? []
+  const stopDoing = summary?.decisionLoop?.stopDoing ?? []
+  const testNext = summary?.decisionLoop?.testNext ?? summary?.recommendedNext ?? []
+
+  return (
+    <div className="mb-4 rounded-md border border-cyan-500/25 bg-cyan-500/5 p-4">
+      <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div className="flex items-start gap-3">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-cyan-500/15 text-cyan-300">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <History className="h-4 w-4" />}
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-sm font-semibold text-slate-100">Prior Campaign Learning</h2>
+              <StatusPill tone={summary ? 'success' : error ? 'warn' : 'neutral'}>
+                {summary ? 'applied' : error ? 'unavailable' : 'loading'}
+              </StatusPill>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-slate-400">
+              Re-launching campaign {campaignId.slice(0, 8)}. These lessons are loaded before generation so the next run can keep what worked and avoid weak patterns.
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={onReload}
+          disabled={loading}
+          className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+        >
+          <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} /> Refresh
+        </button>
+      </div>
+
+      {error ? (
+        <p className="text-xs leading-5 text-amber-200">{error}</p>
+      ) : summary ? (
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <LearningSignal
+              icon={<TrendingUp className="h-3.5 w-3.5" />}
+              label="Keep"
+              value={summary.bestChannel ? `${summary.bestChannel.channel}: ${summary.bestChannel.reason}` : summary.strongestHook ?? 'No winning signal yet'}
+            />
+            <LearningSignal
+              icon={<TrendingDown className="h-3.5 w-3.5" />}
+              label="Avoid"
+              value={summary.worstChannel ? `${summary.worstChannel.channel}: ${summary.worstChannel.reason}` : 'No clear weak channel yet'}
+            />
+            <LearningSignal
+              icon={<Sparkles className="h-3.5 w-3.5" />}
+              label="Hook"
+              value={summary.strongestHook ?? 'No hook identified yet'}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <DecisionSnippet label="Do now" items={doNow} />
+            <DecisionSnippet label="Stop doing" items={stopDoing} />
+            <DecisionSnippet label="Test next" items={testNext} />
+          </div>
+        </div>
+      ) : (
+        <div className="h-24 animate-pulse rounded-md bg-slate-900/60" />
+      )}
+    </div>
+  )
+}
+
+function LearningSignal({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/50 p-3">
+      <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        {icon}
+        {label}
+      </div>
+      <p className="line-clamp-3 text-xs leading-5 text-slate-300">{value}</p>
+    </div>
+  )
+}
+
+function DecisionSnippet({ label, items }: { label: string; items: string[] }) {
+  return (
+    <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/50 p-3">
+      <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        <ListChecks className="h-3.5 w-3.5" />
+        {label}
+      </div>
+      <ul className="space-y-1">
+        {(items.length ? items.slice(0, 3) : ['Waiting for more campaign signal']).map((item, i) => (
+          <li key={i} className="line-clamp-2 text-xs leading-5 text-slate-300">{item}</li>
+        ))}
+      </ul>
     </div>
   )
 }
