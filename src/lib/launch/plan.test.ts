@@ -59,6 +59,9 @@ describe('buildLaunchPlan', () => {
     expect(plan.vertical).toBe('other')
     expect(plan.defaultChannels.length).toBeGreaterThan(0)
     expect(plan.suggestedAngles.length).toBeGreaterThan(0)
+    expect(plan.strategy.summary).toContain('fallback playbook')
+    expect(plan.experiments).toHaveLength(3)
+    expect(plan.answerEngine.assets).toContain('FAQ block answering buyer objections')
   })
 
   it('uses the b2b_saas playbook when classification says so', () => {
@@ -195,5 +198,46 @@ describe('buildLaunchPlan', () => {
     expect(meta?.reason).toMatch(/preferred persona channel/i)
     expect(linkedin?.tier).toBe('secondary')
     expect(plan.defaultChannels).toContain('meta')
+  })
+
+  it('sets engagement as the default goal for experiment-oriented personas', () => {
+    const persona: MarketingPersona = {
+      id: 'persona-growth',
+      projectId: 'p',
+      name: 'Growth Marketer',
+      role: 'Performance Marketer',
+      description: null,
+      painPoints: [],
+      objections: [],
+      buyingTriggers: [],
+      desiredOutcomes: [],
+      vocabulary: ['experiment', 'creative', 'variant'],
+      preferredChannels: ['meta', 'email', 'blog'],
+      skepticismLevel: 'medium',
+      isPrimary: false,
+    }
+
+    const plan = buildLaunchPlan({ memory: makeMemory(), persona })
+
+    expect(plan.defaultGoal).toBe('engagement')
+    expect(plan.strategy.goalRationale).toMatch(/creative learning/i)
+    expect(plan.experiments[1].name).toBe('Channel fit test')
+  })
+
+  it('recommends answer-engine assets when owned channels are on', () => {
+    const plan = buildLaunchPlan({
+      memory: makeMemory({
+        project: { id: 'p', name: 'GrowthOS', website: null, description: null },
+        brand: {
+          ...makeMemory().brand,
+          valueProp: 'launch internal apps faster',
+          audience: 'solo founders',
+        },
+      }),
+    })
+
+    expect(plan.answerEngine.recommended).toBe(true)
+    expect(plan.answerEngine.queries.some((query) => query.includes('GrowthOS'))).toBe(true)
+    expect(plan.strategy.learningObjective).toMatch(/answer-engine/i)
   })
 })

@@ -327,14 +327,41 @@ export async function POST(request: Request) {
         // Merge insights atomically (keep last 5 in history). History needs deep-merge
         // semantics which the RPC doesn't do, so we read → compute → merge just the
         // insights subtree. Still atomic at the brand_voice top level.
-        const prev = (bv.insights as { history?: unknown[] } | undefined)
+        const prev = (bv.insights && typeof bv.insights === 'object'
+          ? bv.insights
+          : {}) as {
+            history?: unknown[]
+            persona_history?: Record<string, unknown[]>
+            persona_current?: Record<string, unknown>
+          }
         const history = Array.isArray(prev?.history) ? prev.history.slice(-4) : []
+        const personaKey = launchPersona?.id ?? 'unassigned'
+        const personaHistory = prev.persona_history && typeof prev.persona_history === 'object' ? prev.persona_history : {}
+        const personaCurrent = prev.persona_current && typeof prev.persona_current === 'object' ? prev.persona_current : {}
+        const priorPersonaHistory = Array.isArray(personaHistory[personaKey]) ? personaHistory[personaKey].slice(-4) : []
+        const personaEntry = {
+          campaign_id: campaignId,
+          timestamp: new Date().toISOString(),
+          persona: launchPersona ? {
+            id: launchPersona.id,
+            name: launchPersona.name,
+            role: launchPersona.role,
+            skepticism_level: launchPersona.skepticismLevel,
+          } : null,
+          insights,
+        }
         await mergeBrandVoice(supabase, projectId, {
           insights: {
+            ...prev,
             last_updated: new Date().toISOString(),
             last_campaign_id: campaignId,
             current: insights,
             history: [...history, { campaign_id: campaignId, timestamp: new Date().toISOString(), insights }],
+            persona_current: { ...personaCurrent, [personaKey]: personaEntry },
+            persona_history: {
+              ...personaHistory,
+              [personaKey]: [...priorPersonaHistory, personaEntry],
+            },
           },
         })
       } catch (err) {
@@ -364,6 +391,11 @@ export async function POST(request: Request) {
             insights,
             persona: launchPersona,
             persona_override_id: overridePersonaId,
+            persona_learning: launchPersona ? {
+              persona_id: launchPersona.id,
+              persona_name: launchPersona.name,
+              insights,
+            } : null,
             finished_at: new Date().toISOString(),
           },
         }).eq('id', campaignId)

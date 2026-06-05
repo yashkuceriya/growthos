@@ -92,6 +92,26 @@ interface LaunchPlan {
   suggestedAngles: string[]
   defaultGoal: string
   defaultAngle: string | null
+  strategy: {
+    summary: string
+    goalRationale: string
+    channelRationale: string
+    risk: string
+    learningObjective: string
+    confidence: 'low' | 'medium' | 'high'
+  }
+  experiments: Array<{
+    name: string
+    hypothesis: string
+    channels: ChannelKey[]
+    successMetric: string
+  }>
+  answerEngine: {
+    recommended: boolean
+    reason: string
+    assets: string[]
+    queries: string[]
+  }
   source: 'classification' | 'fallback'
 }
 
@@ -907,6 +927,23 @@ function PlanPreview({
         </button>
       </div>
 
+      <div className="mb-4 rounded-md border border-emerald-500/25 bg-emerald-500/5 p-4">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-200">Why this plan</h3>
+          <StatusPill tone={plan.strategy.confidence === 'high' ? 'success' : plan.strategy.confidence === 'medium' ? 'warn' : 'neutral'}>
+            {plan.strategy.confidence} confidence
+          </StatusPill>
+        </div>
+        <p className="text-sm leading-6 text-slate-200">{plan.strategy.summary}</p>
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <StrategyNote label="Goal logic" text={plan.strategy.goalRationale} />
+          <StrategyNote label="Channel logic" text={plan.strategy.channelRationale} />
+          <StrategyNote label="Learning loop" text={plan.strategy.learningObjective} />
+        </div>
+        <p className="mt-3 text-xs leading-5 text-amber-200">{plan.strategy.risk}</p>
+      </div>
+
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="rounded-md border border-slate-800 bg-slate-900/60 p-3">
           <span className="font-mono-data text-[10px] uppercase tracking-wider text-slate-500">Primary KPI</span>
@@ -922,6 +959,39 @@ function PlanPreview({
               <span key={m.label} className="rounded bg-slate-800 px-2 py-0.5 text-[10px] text-slate-200">{m.label} <span className="text-emerald-300">{m.pct}%</span></span>
             ))}
           </div>
+        </div>
+      </div>
+
+      {plan.experiments.length > 0 && (
+        <div className="mb-4">
+          <span className="font-mono-data text-[10px] uppercase tracking-wider text-slate-500">Experiments</span>
+          <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-3">
+            {plan.experiments.map((experiment) => (
+              <div key={experiment.name} className="rounded-md border border-slate-800 bg-slate-950/40 p-3">
+                <div className="mb-1 text-xs font-semibold text-slate-100">{experiment.name}</div>
+                <p className="line-clamp-3 text-[11px] leading-5 text-slate-400">{experiment.hypothesis}</p>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {experiment.channels.map((channel) => <StatusPill key={channel} tone="neutral">{channel}</StatusPill>)}
+                </div>
+                <p className="mt-2 text-[10px] leading-4 text-emerald-300">{experiment.successMetric}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="mb-4 rounded-md border border-slate-800 bg-slate-950/40 p-3">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <Search className="h-3.5 w-3.5 text-cyan-300" />
+          <span className="text-xs font-semibold text-slate-100">Answer Engine Plan</span>
+          <StatusPill tone={plan.answerEngine.recommended ? 'success' : 'neutral'}>
+            {plan.answerEngine.recommended ? 'recommended' : 'optional'}
+          </StatusPill>
+        </div>
+        <p className="text-[11px] leading-5 text-slate-400">{plan.answerEngine.reason}</p>
+        <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+          <PersonaSnippet label="Assets" items={plan.answerEngine.assets} />
+          <PersonaSnippet label="Queries" items={plan.answerEngine.queries} />
         </div>
       </div>
 
@@ -1028,6 +1098,15 @@ function PlanPreview({
           </ul>
         </div>
       )}
+    </div>
+  )
+}
+
+function StrategyNote({ label, text }: { label: string; text: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="mb-1 font-mono-data text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
+      <p className="text-[11px] leading-5 text-slate-300">{text}</p>
     </div>
   )
 }

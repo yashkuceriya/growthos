@@ -27,6 +27,29 @@ export interface LaunchChannelRecommendation {
   defaultOn: boolean
 }
 
+export interface LaunchStrategyBrief {
+  summary: string
+  goalRationale: string
+  channelRationale: string
+  risk: string
+  learningObjective: string
+  confidence: 'low' | 'medium' | 'high'
+}
+
+export interface LaunchExperiment {
+  name: string
+  hypothesis: string
+  channels: LaunchChannel[]
+  successMetric: string
+}
+
+export interface AnswerEnginePlan {
+  recommended: boolean
+  reason: string
+  assets: string[]
+  queries: string[]
+}
+
 export interface LaunchPlan {
   vertical: string
   icp: string | null
@@ -45,6 +68,9 @@ export interface LaunchPlan {
   suggestedAngles: string[]
   defaultGoal: string
   defaultAngle: string | null
+  strategy: LaunchStrategyBrief
+  experiments: LaunchExperiment[]
+  answerEngine: AnswerEnginePlan
   // Whether the plan came from a real classification or fell back to the
   // generic playbook. UI uses this to nudge the operator to sync the site.
   source: 'classification' | 'fallback'
@@ -96,8 +122,12 @@ export function buildLaunchPlan({ memory, persona }: BuildLaunchPlanArgs): Launc
   const defaultChannels = channels.filter((c) => c.defaultOn).map((c) => c.channel)
 
   const suggestedAngles = angleSuggestions(memory)
-  const defaultGoal = mapPrimaryGoalToGoalString(memory.classification.primaryGoal)
+  const goalPlan = personaGoalPlan(memory, persona)
+  const defaultGoal = goalPlan.goal
   const defaultAngle = suggestedAngles[0] ?? null
+  const answerEngine = answerEnginePlan(memory, persona, defaultChannels)
+  const experiments = experimentDesign(memory, persona, channels, defaultGoal)
+  const strategy = strategyBrief(memory, persona, channels, defaultGoal, goalPlan.rationale, answerEngine)
 
   return {
     vertical,
@@ -115,6 +145,9 @@ export function buildLaunchPlan({ memory, persona }: BuildLaunchPlanArgs): Launc
     suggestedAngles,
     defaultGoal,
     defaultAngle,
+    strategy,
+    experiments,
+    answerEngine,
     source: vertical === 'other' ? 'fallback' : 'classification',
   }
 }
@@ -216,6 +249,129 @@ function channelLabel(channel: LaunchChannel): string {
     case 'email': return 'email lifecycle'
     case 'blog': return 'long-form blog / SEO'
     case 'landing': return 'landing page'
+  }
+}
+
+function personaGoalPlan(memory: MarketingMemory, persona: MarketingPersona | null | undefined): { goal: string; rationale: string } {
+  const baseGoal = mapPrimaryGoalToGoalString(memory.classification.primaryGoal)
+  if (!persona) {
+    return {
+      goal: baseGoal,
+      rationale: memory.classification.primaryGoal
+        ? `Mapped classifier goal "${memory.classification.primaryGoal}" into the campaign goal "${baseGoal}".`
+        : 'No classifier goal is set yet, so GrowthOS defaults to conversion until launch data says otherwise.',
+    }
+  }
+
+  const label = `${persona.name} ${persona.role ?? ''} ${persona.vocabulary.join(' ')}`.toLowerCase()
+  if (/growth|marketer|experiment|performance|creative|variant/.test(label)) {
+    return {
+      goal: 'engagement',
+      rationale: `${persona.name} needs creative learning and signal quality, so the plan defaults to engagement before scaling conversion spend.`,
+    }
+  }
+  if (/founder|builder|operator|launch|ship|mvp/.test(label)) {
+    return {
+      goal: 'conversion',
+      rationale: `${persona.name} values momentum and usable outcomes, so the plan defaults to conversion-oriented assets.`,
+    }
+  }
+  if (persona.skepticismLevel === 'high') {
+    return {
+      goal: 'conversion',
+      rationale: `${persona.name} is high-skepticism, so GrowthOS emphasizes practical proof, clear CTAs, and conversion evidence.`,
+    }
+  }
+
+  return {
+    goal: baseGoal,
+    rationale: `${persona.name} does not require a goal override, so GrowthOS keeps the project classifier goal.`,
+  }
+}
+
+function strategyBrief(
+  memory: MarketingMemory,
+  persona: MarketingPersona | null | undefined,
+  channels: LaunchChannelRecommendation[],
+  defaultGoal: string,
+  goalRationale: string,
+  answerEngine: AnswerEnginePlan,
+): LaunchStrategyBrief {
+  const personaName = persona?.name ?? memory.classification.icp ?? memory.brand.audience ?? 'the current audience'
+  const primary = channels.filter((c) => c.tier === 'primary').map((c) => channelLabel(c.channel))
+  const off = channels.filter((c) => c.tier === 'off').map((c) => channelLabel(c.channel))
+  const source = memory.blueprint.vertical === 'other' ? 'fallback playbook' : `${memory.blueprint.vertical.replace(/_/g, ' ')} playbook`
+  const confidence = memory.blueprint.vertical === 'other' ? 'medium' : persona ? 'high' : 'medium'
+
+  return {
+    summary: `Launch for ${personaName} using the ${source}, with ${defaultGoal} as the operating goal.`,
+    goalRationale,
+    channelRationale: primary.length
+      ? `Primary channels: ${primary.slice(0, 4).join(', ')}. ${off.length ? `Lower-fit channels stay off unless you have a reason: ${off.slice(0, 3).join(', ')}.` : 'No major channel exclusions.'}`
+      : 'No primary channel emerged yet; keep the launch narrow and use the first run to learn.',
+    risk: persona?.skepticismLevel === 'high'
+      ? 'Biggest risk: copy that sounds generic or over-automated. Use proof, sober language, and specific workflow details.'
+      : 'Biggest risk: spreading effort across too many channels before one message has evidence.',
+    learningObjective: answerEngine.recommended
+      ? 'Learn which persona/channel pair produces reusable hooks, then turn strongest answers into SEO and answer-engine assets.'
+      : 'Learn which hook, CTA, and channel combination earns the first measurable response.',
+    confidence,
+  }
+}
+
+function experimentDesign(
+  memory: MarketingMemory,
+  persona: MarketingPersona | null | undefined,
+  channels: LaunchChannelRecommendation[],
+  defaultGoal: string,
+): LaunchExperiment[] {
+  const primary = channels.filter((c) => c.defaultOn).map((c) => c.channel)
+  const personaName = persona?.name ?? memory.classification.icp ?? 'primary buyer'
+  const first = primary[0] ? [primary[0]] : ['landing' as const]
+  const social = primary.filter((c) => ['linkedin', 'twitter', 'reddit', 'tiktok', 'meta'].includes(c)).slice(0, 2)
+  const owned = primary.filter((c) => ['email', 'blog', 'landing'].includes(c)).slice(0, 2)
+
+  return [
+    {
+      name: 'Hook clarity test',
+      hypothesis: `${personaName} will respond better to a concrete pain/outcome hook than to broad product positioning.`,
+      channels: first,
+      successMetric: defaultGoal === 'engagement' ? 'reply, click, save, or quality score lift' : 'lead capture or CTA click',
+    },
+    {
+      name: 'Channel fit test',
+      hypothesis: `${personaName} will reveal the strongest acquisition path through the persona-preferred channel set.`,
+      channels: social.length ? social as LaunchChannel[] : first,
+      successMetric: 'best channel by click-through, conversion, or manually logged signal',
+    },
+    {
+      name: 'Answer-engine proof test',
+      hypothesis: 'Specific question-answer content will create reusable search and AI-discovery assets after the launch.',
+      channels: owned.length ? owned as LaunchChannel[] : first,
+      successMetric: 'indexed/postable FAQ, comparison, or answer asset with strong quality score',
+    },
+  ]
+}
+
+function answerEnginePlan(memory: MarketingMemory, persona: MarketingPersona | null | undefined, defaultChannels: LaunchChannel[]): AnswerEnginePlan {
+  const audience = persona?.name ?? memory.classification.icp ?? memory.brand.audience ?? 'target buyers'
+  const product = memory.project.name || 'this product'
+  const recommended = defaultChannels.includes('blog') || defaultChannels.includes('landing')
+  return {
+    recommended,
+    reason: recommended
+      ? `Blog or landing page is in the plan, so GrowthOS should package this launch for answer engines as well as humans.`
+      : 'No owned content channel is selected by default, so answer-engine assets are optional for this run.',
+    assets: [
+      'FAQ block answering buyer objections',
+      'comparison paragraph against the status quo',
+      'concise answer snippet for AI search citations',
+    ],
+    queries: [
+      `What is ${product}?`,
+      `How does ${product} help ${audience}?`,
+      `Best way for ${audience} to solve ${memory.brand.valueProp ?? 'this workflow'}`,
+    ],
   }
 }
 
