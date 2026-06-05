@@ -11,12 +11,13 @@ import { StatusPill } from '@/components/ui/status-pill'
 import {
   Rocket, Loader2, CheckCircle2, AlertCircle, ExternalLink, Copy,
   Mail, Music, Search, Users, Globe, FileText, MessageCircle, Briefcase,
-  X, Clock, Sparkles, Target, Compass, RefreshCw,
+  X, Clock, Sparkles, Target, Compass, RefreshCw, Brain,
 } from 'lucide-react'
 // Search icon used in SEO panel; keep explicit import above.
 import { cn } from '@/lib/utils'
 import { QualityVerdict } from '@/components/marketing/quality-verdict'
 import type { GeneratedQualityScore } from '@/lib/marketing/quality'
+import type { MarketingPersona } from '@/lib/marketing/personas'
 
 type ChannelKey = 'meta' | 'linkedin' | 'tiktok' | 'twitter' | 'reddit' | 'email' | 'blog' | 'landing'
 type ChannelStatus = 'pending' | 'generating' | 'ready' | 'failed'
@@ -122,6 +123,8 @@ export default function LaunchPage() {
   const [selectedChannels, setSelectedChannels] = useState<Set<ChannelKey>>(new Set())
   const [goal, setGoal] = useState<string>('')
   const [angle, setAngle] = useState<string>('')
+  const [primaryPersona, setPrimaryPersona] = useState<MarketingPersona | null>(null)
+  const [personaLoading, setPersonaLoading] = useState(false)
 
   // Agent outputs
   type AgentKey = 'cmo' | 'seo' | 'director' | 'analytics'
@@ -216,6 +219,26 @@ export default function LaunchPage() {
 
   useEffect(() => {
     if (activeProject) loadPlan(activeProject.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProject?.id])
+
+  async function loadPrimaryPersona(projectId: string) {
+    setPersonaLoading(true)
+    try {
+      const res = await fetch(`/api/personas?project_id=${encodeURIComponent(projectId)}`)
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.error ?? 'Could not load persona')
+      const personas = (body.personas ?? []) as MarketingPersona[]
+      setPrimaryPersona(personas.find((persona) => persona.isPrimary) ?? personas[0] ?? null)
+    } catch {
+      setPrimaryPersona(null)
+    } finally {
+      setPersonaLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (activeProject) void loadPrimaryPersona(activeProject.id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProject?.id])
 
@@ -366,6 +389,8 @@ export default function LaunchPage() {
           them see what channels GrowthOS recommends, why, and tweak the
           goal/angle if they want to steer the launch away from defaults. */}
       {hasBrandVoice && (
+        <>
+        <PrimaryPersonaPanel persona={primaryPersona} loading={personaLoading} />
         <PlanPreview
           plan={plan}
           loading={planLoading}
@@ -378,6 +403,7 @@ export default function LaunchPage() {
           onChangeAngle={setAngle}
           onReload={() => activeProject && loadPlan(activeProject.id)}
         />
+        </>
       )}
 
       {/* Agent Team Bar */}
@@ -719,6 +745,56 @@ export default function LaunchPage() {
         />
       )}
     </PageShell>
+  )
+}
+
+function PrimaryPersonaPanel({ persona, loading }: { persona: MarketingPersona | null; loading: boolean }) {
+  return (
+    <div className="mb-4 rounded-md border border-slate-800 bg-slate-900/45 p-4">
+      <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div className="flex items-start gap-3">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-emerald-500/15 text-emerald-300">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Brain className="h-4 w-4" />}
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-sm font-semibold text-slate-100">Primary Persona</h2>
+              {persona && <StatusPill tone={persona.skepticismLevel === 'high' ? 'warn' : 'info'}>{persona.skepticismLevel} skepticism</StatusPill>}
+            </div>
+            <p className="mt-1 text-xs leading-5 text-slate-400">
+              {persona
+                ? `${persona.name}${persona.role ? ` · ${persona.role}` : ''}`
+                : loading ? 'Loading the buyer lens for this launch...' : 'No persona found yet. Launch will fall back to project audience memory.'}
+            </p>
+          </div>
+        </div>
+        <a
+          href="/personas"
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-800"
+        >
+          Manage Personas
+        </a>
+      </div>
+
+      {persona && (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <PersonaSnippet label="Pains" items={persona.painPoints} />
+          <PersonaSnippet label="Outcomes" items={persona.desiredOutcomes} />
+          <PersonaSnippet label="Objections" items={persona.objections} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PersonaSnippet({ label, items }: { label: string; items: string[] }) {
+  return (
+    <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/50 p-3">
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</div>
+      <p className="line-clamp-2 text-xs leading-5 text-slate-300">
+        {items.length ? items.slice(0, 3).join(' | ') : 'Not defined yet'}
+      </p>
+    </div>
   )
 }
 
