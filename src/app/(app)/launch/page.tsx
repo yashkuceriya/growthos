@@ -197,11 +197,13 @@ export default function LaunchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProject?.id])
 
-  async function loadPlan(projectId: string) {
+  async function loadPlan(projectId: string, personaId = selectedPersonaId) {
     setPlanLoading(true)
     setPlanError(null)
     try {
-      const res = await fetch(`/api/launch/plan?projectId=${encodeURIComponent(projectId)}`)
+      const params = new URLSearchParams({ projectId })
+      if (personaId) params.set('personaId', personaId)
+      const res = await fetch(`/api/launch/plan?${params.toString()}`)
       if (!res.ok) {
         const body = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string }
         throw new Error(body.error ?? `Plan request failed: ${res.status}`)
@@ -222,6 +224,11 @@ export default function LaunchPage() {
     if (activeProject) loadPlan(activeProject.id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProject?.id])
+
+  useEffect(() => {
+    if (activeProject && selectedPersonaId) void loadPlan(activeProject.id, selectedPersonaId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPersonaId])
 
   async function loadPersonas(projectId: string) {
     setPersonaLoading(true)
@@ -415,7 +422,7 @@ export default function LaunchPage() {
           onToggleChannel={toggleChannel}
           onChangeGoal={setGoal}
           onChangeAngle={setAngle}
-          onReload={() => activeProject && loadPlan(activeProject.id)}
+          onReload={() => activeProject && loadPlan(activeProject.id, selectedPersonaId)}
         />
         </>
       )}

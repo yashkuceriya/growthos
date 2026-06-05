@@ -5,6 +5,7 @@
 // preview endpoint and the POST run validator.
 import { getPlaybook, type Channel as PlaybookChannel } from '@/lib/ai/playbooks/registry'
 import type { MarketingMemory } from '@/lib/marketing/memory'
+import type { MarketingPersona } from '@/lib/marketing/personas'
 
 // The 8 channels the orchestrator actually implements today. The playbook
 // registry knows about many more (google_search, product_hunt, etc.) but
@@ -51,37 +52,43 @@ export interface LaunchPlan {
 
 export interface BuildLaunchPlanArgs {
   memory: MarketingMemory
+  persona?: MarketingPersona | null
 }
 
-export function buildLaunchPlan({ memory }: BuildLaunchPlanArgs): LaunchPlan {
+export function buildLaunchPlan({ memory, persona }: BuildLaunchPlanArgs): LaunchPlan {
   const vertical = memory.blueprint.vertical
   const playbook = getPlaybook(vertical)
 
   const primarySet = new Set<PlaybookChannel>(playbook.primary_channels)
   const secondarySet = new Set<PlaybookChannel>(playbook.secondary_channels)
+  const personaFit = persona ? personaChannelFit(persona) : null
 
   const channels: LaunchChannelRecommendation[] = LAUNCH_CHANNELS.map((ch) => {
     const pbCh = ch as PlaybookChannel
-    if (primarySet.has(pbCh)) {
+    const playbookTier = primarySet.has(pbCh) ? 'primary' : secondarySet.has(pbCh) ? 'secondary' : 'off'
+    const fit = personaFit?.get(ch) ?? null
+    const tier = adjustedTier(playbookTier, fit)
+
+    if (tier === 'primary') {
       return {
         channel: ch,
         tier: 'primary',
-        reason: channelReason(ch, 'primary', vertical),
+        reason: channelReason(ch, 'primary', vertical, fit),
         defaultOn: true,
       }
     }
-    if (secondarySet.has(pbCh)) {
+    if (tier === 'secondary') {
       return {
         channel: ch,
         tier: 'secondary',
-        reason: channelReason(ch, 'secondary', vertical),
+        reason: channelReason(ch, 'secondary', vertical, fit),
         defaultOn: true,
       }
     }
     return {
       channel: ch,
       tier: 'off',
-      reason: channelReason(ch, 'off', vertical),
+      reason: channelReason(ch, 'off', vertical, fit),
       defaultOn: false,
     }
   })
@@ -149,8 +156,51 @@ function blueprintAngles(memory: MarketingMemory): string[] {
   return angles
 }
 
-function channelReason(channel: LaunchChannel, tier: 'primary' | 'secondary' | 'off', vertical: string): string {
+type PersonaFit = 'preferred' | 'adjacent' | 'mismatch'
+
+function adjustedTier(tier: 'primary' | 'secondary' | 'off', fit: PersonaFit | null): 'primary' | 'secondary' | 'off' {
+  if (fit === 'preferred') return tier === 'off' ? 'secondary' : 'primary'
+  if (fit === 'adjacent') return tier === 'off' ? 'secondary' : tier
+  if (fit === 'mismatch') return tier === 'primary' ? 'secondary' : 'off'
+  return tier
+}
+
+function personaChannelFit(persona: MarketingPersona): Map<LaunchChannel, PersonaFit> {
+  const preferred = new Set(persona.preferredChannels.map((channel) => channel.toLowerCase()))
+  const fits = new Map<LaunchChannel, PersonaFit>()
+
+  for (const channel of LAUNCH_CHANNELS) {
+    if (preferred.has(channel)) fits.set(channel, 'preferred')
+  }
+
+  if (preferred.has('social')) {
+    for (const channel of ['twitter', 'linkedin', 'reddit', 'tiktok'] as const) {
+      if (!fits.has(channel)) fits.set(channel, 'adjacent')
+    }
+  }
+  if (preferred.has('ads')) {
+    for (const channel of ['meta', 'linkedin', 'tiktok'] as const) {
+      if (!fits.has(channel)) fits.set(channel, 'adjacent')
+    }
+  }
+  if (preferred.has('seo') || preferred.has('content')) {
+    for (const channel of ['blog', 'landing'] as const) {
+      if (!fits.has(channel)) fits.set(channel, 'adjacent')
+    }
+  }
+
+  for (const channel of LAUNCH_CHANNELS) {
+    if (!fits.has(channel) && preferred.size > 0) fits.set(channel, 'mismatch')
+  }
+
+  return fits
+}
+
+function channelReason(channel: LaunchChannel, tier: 'primary' | 'secondary' | 'off', vertical: string, fit: PersonaFit | null): string {
   const verticalLabel = vertical === 'other' ? 'this product type' : vertical.replace(/_/g, ' ')
+  if (fit === 'preferred') return `${channelLabel(channel)} is a preferred persona channel, so GrowthOS prioritizes it for this buyer.`
+  if (fit === 'adjacent') return `${channelLabel(channel)} is adjacent to this persona's preferred channels and useful as a supporting test.`
+  if (fit === 'mismatch' && tier === 'off') return `${channelLabel(channel)} is not a strong fit for this persona's preferred channels. Enable only with a specific reason.`
   if (tier === 'primary') return `Recommended for ${verticalLabel}: the playbook puts ${channelLabel(channel)} in the top channel mix.`
   if (tier === 'secondary') return `Secondary fit for ${verticalLabel}: useful as a multiplier, lower expected ROI than primary channels.`
   return `Outside the recommended playbook for ${verticalLabel}. Enable manually if you have a specific reason.`

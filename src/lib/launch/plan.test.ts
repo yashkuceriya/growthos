@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildLaunchPlan, isLaunchChannel, LAUNCH_CHANNELS } from './plan'
 import type { MarketingMemory } from '@/lib/marketing/memory'
+import type { MarketingPersona } from '@/lib/marketing/personas'
 
 function makeMemory(overrides: Partial<MarketingMemory> = {}): MarketingMemory {
   const defaults: MarketingMemory = {
@@ -158,5 +159,41 @@ describe('buildLaunchPlan', () => {
     expect(plan.suggestedAngles.some((a) => a.includes('Save and recall everything'))).toBe(true)
     expect(plan.suggestedAngles.some((a) => a.includes('AI built-in'))).toBe(true)
     expect(plan.defaultAngle).not.toBeNull()
+  })
+
+  it('adjusts channel defaults around persona preferred channels', () => {
+    const persona: MarketingPersona = {
+      id: 'persona-growth',
+      projectId: 'p',
+      name: 'Growth Marketer',
+      role: 'Marketer',
+      description: null,
+      painPoints: [],
+      objections: [],
+      buyingTriggers: [],
+      desiredOutcomes: [],
+      vocabulary: [],
+      preferredChannels: ['meta', 'email', 'blog'],
+      skepticismLevel: 'medium',
+      isPrimary: false,
+    }
+
+    const plan = buildLaunchPlan({
+      memory: makeMemory({
+        blueprint: {
+          ...makeMemory().blueprint,
+          vertical: 'b2b_saas',
+        },
+      }),
+      persona,
+    })
+
+    const meta = plan.channels.find((c) => c.channel === 'meta')
+    const linkedin = plan.channels.find((c) => c.channel === 'linkedin')
+    expect(meta?.tier).toBe('secondary')
+    expect(meta?.defaultOn).toBe(true)
+    expect(meta?.reason).toMatch(/preferred persona channel/i)
+    expect(linkedin?.tier).toBe('secondary')
+    expect(plan.defaultChannels).toContain('meta')
   })
 })

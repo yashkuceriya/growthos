@@ -9,6 +9,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { getMarketingMemory } from '@/lib/marketing/memory'
 import { buildLaunchPlan } from '@/lib/launch/plan'
+import { getPersonaById } from '@/lib/marketing/personas'
 
 export async function GET(request: Request) {
   const supabase = await createClient()
@@ -17,6 +18,7 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url)
   const projectId = url.searchParams.get('projectId')
+  const personaId = url.searchParams.get('personaId')
   if (!projectId) return Response.json({ error: 'projectId required' }, { status: 400 })
 
   // Verify ownership explicitly. Memory fetcher uses RLS but we want a
@@ -35,7 +37,8 @@ export async function GET(request: Request) {
     projectId,
   })
 
-  const plan = buildLaunchPlan({ memory })
+  const persona = await getPersonaById(supabase, projectId, personaId, memory)
+  const plan = buildLaunchPlan({ memory, persona })
 
-  return Response.json({ plan })
+  return Response.json({ plan, persona })
 }

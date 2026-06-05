@@ -36,6 +36,11 @@ vi.mock('@/lib/launch/plan', () => ({
   buildLaunchPlan: (...args: unknown[]) => buildLaunchPlanMock(...args),
 }))
 
+const getPersonaByIdMock = vi.fn()
+vi.mock('@/lib/marketing/personas', () => ({
+  getPersonaById: (...args: unknown[]) => getPersonaByIdMock(...args),
+}))
+
 import { GET } from './route'
 
 function makeMemory() {
@@ -58,6 +63,7 @@ beforeEach(() => {
   state.ownedProject = { id: 'p1' }
   state.memory = makeMemory()
   getMarketingMemoryMock.mockResolvedValue(state.memory)
+  getPersonaByIdMock.mockResolvedValue(null)
   buildLaunchPlanMock.mockReturnValue({ vertical: 'b2b_saas', defaultChannels: ['linkedin', 'email'] })
 })
 
@@ -89,6 +95,18 @@ describe('GET /api/launch/plan', () => {
     const body = await res.json()
     expect(body.plan).toMatchObject({ vertical: 'b2b_saas', defaultChannels: ['linkedin', 'email'] })
     expect(getMarketingMemoryMock).toHaveBeenCalled()
-    expect(buildLaunchPlanMock).toHaveBeenCalledWith({ memory: state.memory })
+    expect(buildLaunchPlanMock).toHaveBeenCalledWith({ memory: state.memory, persona: null })
+  })
+
+  it('passes personaId into the planner when provided', async () => {
+    const persona = { id: 'persona-1', name: 'Growth Marketer' }
+    getPersonaByIdMock.mockResolvedValue(persona)
+    const req = new Request('https://app.test/api/launch/plan?projectId=p1&personaId=persona-1')
+    const res = await GET(req)
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.persona).toStrictEqual(persona)
+    expect(getPersonaByIdMock).toHaveBeenCalledWith(expect.anything(), 'p1', 'persona-1', state.memory)
+    expect(buildLaunchPlanMock).toHaveBeenCalledWith({ memory: state.memory, persona })
   })
 })
