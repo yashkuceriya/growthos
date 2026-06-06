@@ -23,7 +23,7 @@ import {
 } from 'lucide-react'
 import { useProject } from '@/hooks/use-project'
 import { cn } from '@/lib/utils'
-import type { IntegrationHealth } from '@/app/api/dashboard/health/route'
+import type { IntegrationHealth } from '@/lib/services/service-readiness'
 
 type Command = {
   href: string

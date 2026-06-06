@@ -8,12 +8,12 @@ import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { Key, Plug, User, Users as TeamIcon, CreditCard, Plus, Copy, Trash2, Share2, MessageCircle, Briefcase, Webhook, Power, ChevronDown, ChevronRight, Send, RefreshCw, BookOpen } from 'lucide-react'
+import { Key, Plug, User, Users as TeamIcon, CreditCard, Plus, Copy, Trash2, Share2, MessageCircle, Briefcase, Webhook, Power, ChevronDown, ChevronRight, Send, RefreshCw, BookOpen, CheckCircle2, CircleDashed, LockKeyhole, Workflow } from 'lucide-react'
 import { WebhookVerifySnippet } from '@/components/ui/webhook-verify-snippet'
 import { WEBHOOK_EVENTS } from '@/lib/webhooks/events'
 import { ApiReference } from '@/components/ui/api-reference'
 import { useProject } from '@/hooks/use-project'
-import type { IntegrationHealth } from '@/app/api/dashboard/health/route'
+import { countConfiguredProviderServices, countLocalBlockers, type IntegrationHealth } from '@/lib/services/service-readiness'
 
 const SECTIONS = [
   { key: 'profile', label: 'Profile', icon: User },
@@ -76,6 +76,79 @@ function isActive(k: ApiKeyRow, nowMs: number): boolean {
   if (k.revoked_at) return false
   if (!k.expires_at) return true
   return new Date(k.expires_at).getTime() > nowMs
+}
+
+function ServiceFlowPanel({ integrations }: { integrations: IntegrationHealth[] }) {
+  if (integrations.length === 0) return null
+
+  const localBlockers = countLocalBlockers(integrations)
+  const providerCount = countConfiguredProviderServices(integrations)
+  const openRouter = integrations.find((i) => i.name === 'OpenRouter')
+  const deliveryReady = integrations.some((i) => i.category === 'delivery' && i.configured)
+  const localReady = localBlockers === 0
+
+  const steps = [
+    {
+      title: 'Local marketing flow',
+      state: localReady ? 'Ready' : 'Repair needed',
+      icon: localReady ? CheckCircle2 : CircleDashed,
+      tone: localReady ? 'success' : 'warn',
+      detail: localReady
+        ? 'Projects, personas, launches, campaign learning, API keys, webhooks, and manual review loops can run before provider keys exist.'
+        : `${localBlockers} foundation check${localBlockers === 1 ? '' : 's'} need attention before the local flow is reliable.`,
+    },
+    {
+      title: 'First AI key later',
+      state: openRouter?.configured ? 'Connected' : 'Later',
+      icon: LockKeyhole,
+      tone: openRouter?.configured ? 'success' : 'neutral',
+      detail: openRouter?.configured
+        ? 'Live generation is unlocked. Watch recent calls and cost from the dashboard.'
+        : 'When you are ready, add OPENROUTER_API_KEY first. It unlocks the broadest agent and content surface.',
+    },
+    {
+      title: 'Delivery automation',
+      state: deliveryReady ? 'Started' : 'Later',
+      icon: Workflow,
+      tone: deliveryReady ? 'success' : 'neutral',
+      detail: deliveryReady
+        ? `${providerCount} provider service${providerCount === 1 ? '' : 's'} connected beyond the database foundation.`
+        : 'Add Resend, social encryption, video, screenshots, and cron keys only when those workflows need to go live.',
+    },
+  ] as const
+
+  return (
+    <div className="mb-4 rounded-md border border-emerald-500/30 bg-emerald-500/[0.03] p-4">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400">Local-first flow</div>
+          <h3 className="mt-1 text-sm font-semibold text-slate-100">Keys can come later</h3>
+          <p className="mt-1 max-w-2xl text-xs text-slate-400">
+            GrowthOS should stay useful as an internal marketing command center even before external AI, email, video, or social providers are connected.
+          </p>
+        </div>
+        <StatusPill tone={localReady ? 'success' : 'warn'}>{localReady ? 'Local flow ready' : 'Foundation needs repair'}</StatusPill>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        {steps.map((step) => {
+          const Icon = step.icon
+          return (
+            <div key={step.title} className="rounded-md border border-slate-800 bg-slate-900/55 p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Icon className="h-4 w-4 text-emerald-400" />
+                  <h4 className="text-xs font-semibold text-slate-100">{step.title}</h4>
+                </div>
+                <StatusPill tone={step.tone}>{step.state}</StatusPill>
+              </div>
+              <p className="text-xs leading-5 text-slate-400">{step.detail}</p>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
 }
 
 export default function SettingsPage() {
@@ -827,8 +900,9 @@ export default function SettingsPage() {
 
           {section === 'integrations' && (
             <SectionPanel title="Integrations">
+              <ServiceFlowPanel integrations={integrationsList} />
               <p className="mb-4 text-xs text-slate-400">
-                Status of every external service GrowthOS depends on. Required services must be configured for the system to work; optional services unlock additional capability when enabled.
+                Status of every external service GrowthOS can use. Foundation services keep the local app reliable; provider services unlock live generation, sending, publishing, screenshots, video, and background automation when keys are added.
               </p>
               {integrationsLoading && integrationsList.length === 0 ? (
                 <p className="text-xs text-slate-500">Checking…</p>
@@ -852,6 +926,27 @@ export default function SettingsPage() {
                           <StatusPill tone={tone}>{label}</StatusPill>
                         </div>
                         <p className="text-xs text-slate-400">{i.detail}</p>
+                        <div className="mt-3 space-y-2 border-t border-slate-800 pt-3">
+                          {i.envVars.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {i.envVars.map((envVar) => (
+                                <code key={envVar} className="rounded border border-slate-700 bg-slate-900 px-1.5 py-0.5 font-mono-data text-[10px] text-slate-400">
+                                  {envVar}
+                                </code>
+                              ))}
+                            </div>
+                          )}
+                          <div>
+                            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Unlocks</div>
+                            <p className="mt-1 text-[11px] leading-5 text-slate-400">{i.unlocks}</p>
+                          </div>
+                          {!i.configured && (
+                            <div>
+                              <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Until then</div>
+                              <p className="mt-1 text-[11px] leading-5 text-slate-400">{i.localFallback}</p>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )
                   })}

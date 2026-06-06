@@ -5,7 +5,7 @@ import { PageShell } from '@/components/ui/page-shell'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionPanel } from '@/components/ui/section-panel'
 import { Mail, Book, Bug, ExternalLink } from 'lucide-react'
-import type { IntegrationHealth } from '@/app/api/dashboard/health/route'
+import type { IntegrationHealth } from '@/lib/services/service-readiness'
 
 // Real links — no `#` placeholders. The API Reference lives inside the
 // app at /settings; community chat is intentionally absent until we

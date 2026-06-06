@@ -9,13 +9,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { wrapHandler } from '@/lib/api-error'
-
-export interface IntegrationHealth {
-  name: string
-  configured: boolean
-  status: 'ok' | 'warn' | 'error' | 'optional'
-  detail: string
-}
+import { computeServiceIntegrations } from '@/lib/services/service-readiness'
 
 export interface DashboardActivity {
   id: string
@@ -55,13 +49,13 @@ async function handleGet(request: Request) {
   // (cross-project) view. We still surface integration health globally
   // since env vars are per-deployment, not per-project.
 
-  const integrations = computeIntegrations()
   const [activity, kpi, setup, rpcHealth] = await Promise.all([
     fetchActivity(supabase, projectId),
     fetchKpi(supabase, user.id, projectId),
     projectId ? fetchSetupState(supabase, projectId) : Promise.resolve(null),
     checkCriticalRpcs(supabase),
   ])
+  const integrations = computeServiceIntegrations(process.env)
 
   // Stitch DB-function presence into the integrations list so the user
   // sees "migration 025 needed" surfaced visibly. Otherwise the failure
@@ -72,6 +66,10 @@ async function handleGet(request: Request) {
       configured: false,
       status: 'error',
       detail: `Missing RPCs: ${rpcHealth.missing.join(', ')}. Apply supabase/migrations/025_rpc_redo.sql to repair.`,
+      category: 'foundation',
+      envVars: [],
+      localFallback: 'Apply the repair migration before relying on budget, rate limit, or brand merge flows.',
+      unlocks: 'Budget caps, rate limits, and atomic brand-voice merges',
     })
   } else {
     integrations.push({
@@ -79,6 +77,10 @@ async function handleGet(request: Request) {
       configured: true,
       status: 'ok',
       detail: 'All critical RPCs present (merge / spend / rate-token)',
+      category: 'foundation',
+      envVars: [],
+      localFallback: 'Already available.',
+      unlocks: 'Budget caps, rate limits, and atomic brand-voice merges',
     })
   }
 
@@ -93,6 +95,10 @@ async function handleGet(request: Request) {
       configured: false,
       status: 'error',
       detail: `Cache is stale — INSERT into ${cacheCheck.staleTable} returns PGRST205 even though the table exists. Apply supabase/migrations/025_rpc_redo.sql (the NOTIFY at the bottom reloads the cache).`,
+      category: 'foundation',
+      envVars: [],
+      localFallback: 'Reload the schema cache before creating API keys, webhooks, or jobs.',
+      unlocks: 'Writes into recently migrated tables',
     })
   }
 
@@ -201,73 +207,6 @@ async function fetchSetupState(
     hasFirstAd: (adCount ?? 0) > 0,
     hasFirstCampaign: (campaignCount ?? 0) > 0,
   }
-}
-
-function computeIntegrations(): IntegrationHealth[] {
-  const has = (k: string) => !!process.env[k]
-
-  const items: IntegrationHealth[] = [
-    {
-      name: 'Supabase',
-      configured: has('NEXT_PUBLIC_SUPABASE_URL') && has('SUPABASE_SERVICE_ROLE_KEY'),
-      status: 'ok',
-      detail: 'Database + auth + storage',
-    },
-    {
-      name: 'OpenRouter',
-      configured: has('OPENROUTER_API_KEY'),
-      status: has('OPENROUTER_API_KEY') ? 'ok' : 'error',
-      detail: has('OPENROUTER_API_KEY') ? 'Key set' : 'Set OPENROUTER_API_KEY to enable AI generation',
-    },
-    {
-      name: 'Anthropic (Claude)',
-      configured: has('ANTHROPIC_API_KEY'),
-      status: has('ANTHROPIC_API_KEY') ? 'ok' : 'optional',
-      detail: has('ANTHROPIC_API_KEY')
-        ? 'Strategic agents use Claude'
-        : 'Optional — strategic agents fall back to Gemini',
-    },
-    {
-      name: 'Resend',
-      configured: has('RESEND_API_KEY') && has('RESEND_FROM_EMAIL'),
-      status: has('RESEND_API_KEY') && has('RESEND_FROM_EMAIL') ? 'ok' : 'optional',
-      detail: has('RESEND_API_KEY') && has('RESEND_FROM_EMAIL') ? 'Email send + webhooks live' : 'Optional — disables email sending',
-    },
-    {
-      name: 'ScreenshotOne',
-      configured: has('SCREENSHOTONE_ACCESS_KEY'),
-      status: has('SCREENSHOTONE_ACCESS_KEY') ? 'ok' : 'optional',
-      detail: has('SCREENSHOTONE_ACCESS_KEY')
-        ? has('SCREENSHOT_STORAGE_BUCKET') ? 'Capturing + mirroring to Storage' : 'Capturing (set SCREENSHOT_STORAGE_BUCKET to mirror)'
-        : 'Optional — disables fresh-rendered UI capture during ingest',
-    },
-    {
-      name: 'Video providers',
-      configured: has('FAL_KEY') || has('OPENAI_API_KEY') || has('XAI_API_KEY'),
-      status: has('FAL_KEY') || has('OPENAI_API_KEY') || has('XAI_API_KEY') ? 'ok' : 'optional',
-      detail: [
-        has('FAL_KEY') && 'fal',
-        has('OPENAI_API_KEY') && 'openai',
-        has('XAI_API_KEY') && 'xai',
-      ].filter(Boolean).join(', ') || 'Optional — set FAL_KEY / OPENAI_API_KEY / XAI_API_KEY',
-    },
-    {
-      name: 'Social tokens',
-      configured: has('SOCIAL_TOKEN_ENC_KEY'),
-      status: has('SOCIAL_TOKEN_ENC_KEY') ? 'ok' : 'warn',
-      detail: has('SOCIAL_TOKEN_ENC_KEY')
-        ? 'Encryption key set — tokens stored AES-256-GCM'
-        : 'Set SOCIAL_TOKEN_ENC_KEY to enable social publishing',
-    },
-    {
-      name: 'Webhook outbox',
-      configured: has('CRON_SECRET'),
-      status: has('CRON_SECRET') ? 'ok' : 'warn',
-      detail: has('CRON_SECRET') ? 'Cron drainer authenticated' : 'CRON_SECRET missing — webhook + queue crons cannot run',
-    },
-  ]
-
-  return items
 }
 
 async function fetchActivity(

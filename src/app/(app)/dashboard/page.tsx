@@ -13,7 +13,8 @@ import { AllProjectsGrid } from '@/components/dashboard/all-projects-grid'
 import { SetupChecklist, buildSteps } from '@/components/dashboard/setup-checklist'
 import { MarketingBlueprintPanel } from '@/components/dashboard/marketing-blueprint'
 import { NextBestActionPanel } from '@/components/dashboard/next-best-action'
-import type { IntegrationHealth, DashboardActivity, SetupChecklistState } from '@/app/api/dashboard/health/route'
+import type { DashboardActivity, SetupChecklistState } from '@/app/api/dashboard/health/route'
+import type { IntegrationHealth } from '@/lib/services/service-readiness'
 
 interface KpiData {
   activeCampaigns: number
