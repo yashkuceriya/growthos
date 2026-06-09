@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils'
 import { QualityVerdict } from '@/components/marketing/quality-verdict'
 import type { GeneratedQualityScore } from '@/lib/marketing/quality'
 import type { MarketingPersona } from '@/lib/marketing/personas'
+import { buildLaunchExecutionBrief } from '@/lib/launch/plan'
 
 type ChannelKey = 'meta' | 'linkedin' | 'tiktok' | 'twitter' | 'reddit' | 'email' | 'blog' | 'landing'
 type ChannelStatus = 'pending' | 'generating' | 'ready' | 'failed'
@@ -490,6 +491,9 @@ export default function LaunchPage() {
           plan={plan}
           loading={planLoading}
           error={planError}
+          projectName={activeProject.name}
+          personaName={selectedPersona?.name ?? null}
+          priorLearning={priorLearning}
           selected={selectedChannels}
           goal={goal}
           angle={angle}
@@ -497,6 +501,7 @@ export default function LaunchPage() {
           onChangeGoal={setGoal}
           onChangeAngle={setAngle}
           onReload={() => activeProject && loadPlan(activeProject.id, selectedPersonaId)}
+          onCopyBrief={copyText}
         />
         </>
       )}
@@ -1034,11 +1039,15 @@ function DecisionSnippet({ label, items }: { label: string; items: string[] }) {
 
 function PlanPreview({
   plan, loading, error, selected, goal, angle,
-  onToggleChannel, onChangeGoal, onChangeAngle, onReload,
+  projectName, personaName, priorLearning,
+  onToggleChannel, onChangeGoal, onChangeAngle, onReload, onCopyBrief,
 }: {
   plan: LaunchPlan | null
   loading: boolean
   error: string | null
+  projectName: string
+  personaName: string | null
+  priorLearning: LearningSummary | null
   selected: Set<ChannelKey>
   goal: string
   angle: string
@@ -1046,6 +1055,7 @@ function PlanPreview({
   onChangeGoal: (s: string) => void
   onChangeAngle: (s: string) => void
   onReload: () => void
+  onCopyBrief: (text: string) => void
 }) {
   if (loading && !plan) {
     return (
@@ -1066,6 +1076,17 @@ function PlanPreview({
   if (!plan) return null
 
   const goalOptions = ['awareness', 'engagement', 'conversion']
+  const copyLocalBrief = () => {
+    onCopyBrief(buildLaunchExecutionBrief({
+      plan,
+      selectedChannels: Array.from(selected),
+      projectName,
+      personaName,
+      goal,
+      angle,
+      priorLearning,
+    }))
+  }
 
   return (
     <div className="mb-6 rounded-md border border-slate-800 bg-slate-900/40 p-5">
@@ -1080,13 +1101,22 @@ function PlanPreview({
           </div>
           {plan.icp && <p className="mt-1 text-xs text-slate-400">ICP: {plan.icp}</p>}
         </div>
-        <button
-          onClick={onReload}
-          className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-800"
-          title="Reload plan"
-        >
-          <RefreshCw className="h-3 w-3" /> Reload
-        </button>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <button
+            onClick={copyLocalBrief}
+            className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-300 hover:bg-emerald-500/15"
+            title="Copy local execution brief"
+          >
+            <Copy className="h-3 w-3" /> Copy Brief
+          </button>
+          <button
+            onClick={onReload}
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:bg-slate-800"
+            title="Reload plan"
+          >
+            <RefreshCw className="h-3 w-3" /> Reload
+          </button>
+        </div>
       </div>
 
       <div className="mb-4 rounded-md border border-emerald-500/25 bg-emerald-500/5 p-4">
@@ -1155,6 +1185,23 @@ function PlanPreview({
           <PersonaSnippet label="Assets" items={plan.answerEngine.assets} />
           <PersonaSnippet label="Queries" items={plan.answerEngine.queries} />
         </div>
+      </div>
+
+      <div className="mb-4 rounded-md border border-cyan-500/25 bg-cyan-500/5 p-3">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <ListChecks className="h-3.5 w-3.5 text-cyan-300" />
+          <span className="text-xs font-semibold text-slate-100">Local Execution Brief</span>
+          <StatusPill tone="info">no provider keys needed</StatusPill>
+        </div>
+        <p className="text-[11px] leading-5 text-slate-400">
+          Copy this plan as a Markdown operating brief for manual publishing, internal review, or a founder launch sprint. It uses the current persona, goal, angle, selected channels, experiments, answer-engine work, and any prior campaign learning.
+        </p>
+        <button
+          onClick={copyLocalBrief}
+          className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-cyan-500/40 bg-cyan-500/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-cyan-200 hover:bg-cyan-500/15"
+        >
+          <Copy className="h-3.5 w-3.5" /> Copy Local Brief
+        </button>
       </div>
 
       <div className="mb-4">

@@ -81,6 +81,28 @@ export interface BuildLaunchPlanArgs {
   persona?: MarketingPersona | null
 }
 
+export interface LaunchExecutionLearning {
+  bestChannel?: { channel: string; reason: string } | null
+  worstChannel?: { channel: string; reason: string } | null
+  strongestHook?: string | null
+  recommendedNext?: string[]
+  decisionLoop?: {
+    doNow?: string[]
+    stopDoing?: string[]
+    testNext?: string[]
+  }
+}
+
+export interface BuildLaunchExecutionBriefArgs {
+  plan: LaunchPlan
+  selectedChannels?: LaunchChannel[]
+  projectName?: string | null
+  personaName?: string | null
+  goal?: string | null
+  angle?: string | null
+  priorLearning?: LaunchExecutionLearning | null
+}
+
 export function buildLaunchPlan({ memory, persona }: BuildLaunchPlanArgs): LaunchPlan {
   const vertical = memory.blueprint.vertical
   const playbook = getPlaybook(vertical)
@@ -150,6 +172,81 @@ export function buildLaunchPlan({ memory, persona }: BuildLaunchPlanArgs): Launc
     answerEngine,
     source: vertical === 'other' ? 'fallback' : 'classification',
   }
+}
+
+export function buildLaunchExecutionBrief({
+  plan,
+  selectedChannels,
+  projectName,
+  personaName,
+  goal,
+  angle,
+  priorLearning,
+}: BuildLaunchExecutionBriefArgs): string {
+  const channels = selectedChannels?.length
+    ? plan.channels.filter((c) => selectedChannels.includes(c.channel))
+    : plan.channels.filter((c) => c.defaultOn)
+  const channelNames = channels.map((c) => channelLabel(c.channel))
+  const selectedGoal = goal?.trim() || plan.defaultGoal
+  const selectedAngle = angle?.trim() || plan.defaultAngle || plan.suggestedAngles[0] || 'Pick the strongest problem/outcome angle before publishing.'
+  const doNow = priorLearning?.decisionLoop?.doNow ?? []
+  const stopDoing = priorLearning?.decisionLoop?.stopDoing ?? []
+  const testNext = priorLearning?.decisionLoop?.testNext ?? priorLearning?.recommendedNext ?? []
+
+  const lines = [
+    `# Launch brief: ${projectName?.trim() || 'Current project'}`,
+    '',
+    '## Operating choices',
+    `- Goal: ${selectedGoal}`,
+    `- Persona: ${personaName?.trim() || plan.icp || 'Primary buyer'}`,
+    `- Primary KPI: ${plan.primaryKpi}`,
+    `- Narrative angle: ${selectedAngle}`,
+    `- Channels: ${channelNames.length ? channelNames.join(', ') : 'Pick one focused channel before publishing.'}`,
+    '',
+    '## Strategy',
+    `- Summary: ${plan.strategy.summary}`,
+    `- Goal logic: ${plan.strategy.goalRationale}`,
+    `- Channel logic: ${plan.strategy.channelRationale}`,
+    `- Learning objective: ${plan.strategy.learningObjective}`,
+    `- Risk to watch: ${plan.strategy.risk}`,
+    '',
+    '## Channel actions',
+    ...channels.map((c) => `- ${channelLabel(c.channel)} (${c.tier}): ${c.reason}`),
+    '',
+    '## Experiments',
+    ...plan.experiments.map((e) => `- ${e.name}: ${e.hypothesis} Success metric: ${e.successMetric}`),
+    '',
+    '## Answer-engine work',
+    `- Recommendation: ${plan.answerEngine.recommended ? 'Do it in this launch' : 'Optional for this launch'}`,
+    `- Why: ${plan.answerEngine.reason}`,
+    ...plan.answerEngine.assets.map((asset) => `- Asset: ${asset}`),
+    ...plan.answerEngine.queries.map((query) => `- Query: ${query}`),
+    '',
+    '## Next 48 hours',
+    '- Tighten the narrative angle until it names the buyer, pain, outcome, and proof.',
+    '- Ship the highest-fit selected channel first, then reuse the winning hook in the next channel.',
+    '- Log manual metrics on the campaign page so the learning loop improves the next launch.',
+  ]
+
+  if (plan.readiness.some((item) => !item.ready)) {
+    lines.push(
+      '',
+      '## Readiness gaps',
+      ...plan.readiness.filter((item) => !item.ready).map((item) => `- ${item.label}: ${item.hint}`),
+    )
+  }
+
+  if (doNow.length || stopDoing.length || testNext.length || priorLearning?.strongestHook || priorLearning?.bestChannel || priorLearning?.worstChannel) {
+    lines.push('', '## Prior campaign learning')
+    if (priorLearning?.bestChannel) lines.push(`- Keep: ${priorLearning.bestChannel.channel}: ${priorLearning.bestChannel.reason}`)
+    if (priorLearning?.worstChannel) lines.push(`- Avoid: ${priorLearning.worstChannel.channel}: ${priorLearning.worstChannel.reason}`)
+    if (priorLearning?.strongestHook) lines.push(`- Strongest hook: ${priorLearning.strongestHook}`)
+    for (const item of doNow.slice(0, 3)) lines.push(`- Do now: ${item}`)
+    for (const item of stopDoing.slice(0, 3)) lines.push(`- Stop doing: ${item}`)
+    for (const item of testNext.slice(0, 3)) lines.push(`- Test next: ${item}`)
+  }
+
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 
 // Pulls 3-4 narrative-angle starters out of memory. Prefers angles distilled

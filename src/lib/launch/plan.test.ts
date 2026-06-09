@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildLaunchPlan, isLaunchChannel, LAUNCH_CHANNELS } from './plan'
+import { buildLaunchExecutionBrief, buildLaunchPlan, isLaunchChannel, LAUNCH_CHANNELS } from './plan'
 import type { MarketingMemory } from '@/lib/marketing/memory'
 import type { MarketingPersona } from '@/lib/marketing/personas'
 
@@ -239,5 +239,60 @@ describe('buildLaunchPlan', () => {
     expect(plan.answerEngine.recommended).toBe(true)
     expect(plan.answerEngine.queries.some((query) => query.includes('GrowthOS'))).toBe(true)
     expect(plan.strategy.learningObjective).toMatch(/answer-engine/i)
+  })
+
+  it('builds a local execution brief from selected plan choices', () => {
+    const plan = buildLaunchPlan({
+      memory: makeMemory({
+        project: { id: 'p', name: 'GrowthOS', website: null, description: null },
+        brand: {
+          ...makeMemory().brand,
+          valueProp: 'ship campaigns faster',
+          audience: 'solo founders',
+        },
+      }),
+    })
+
+    const brief = buildLaunchExecutionBrief({
+      plan,
+      selectedChannels: ['blog', 'landing'],
+      projectName: 'GrowthOS',
+      personaName: 'Founder Operator',
+      goal: 'conversion',
+      angle: 'Ship the next campaign without losing the thread',
+    })
+
+    expect(brief).toContain('# Launch brief: GrowthOS')
+    expect(brief).toContain('- Persona: Founder Operator')
+    expect(brief).toContain('- Goal: conversion')
+    expect(brief).toContain('long-form blog / SEO')
+    expect(brief).toContain('landing page')
+    expect(brief).toContain('- long-form blog / SEO (')
+    expect(brief).toContain('- landing page (')
+    expect(brief).toContain('## Next 48 hours')
+  })
+
+  it('includes prior campaign learning in the local execution brief', () => {
+    const plan = buildLaunchPlan({ memory: makeMemory() })
+
+    const brief = buildLaunchExecutionBrief({
+      plan,
+      priorLearning: {
+        bestChannel: { channel: 'email', reason: 'highest replies' },
+        worstChannel: { channel: 'tiktok', reason: 'low-fit audience' },
+        strongestHook: 'Launch faster without hiring an agency',
+        decisionLoop: {
+          doNow: ['Reuse the email hook'],
+          stopDoing: ['Avoid broad founder productivity claims'],
+          testNext: ['Try a comparison landing page'],
+        },
+      },
+    })
+
+    expect(brief).toContain('## Prior campaign learning')
+    expect(brief).toContain('Keep: email: highest replies')
+    expect(brief).toContain('Avoid: tiktok: low-fit audience')
+    expect(brief).toContain('Strongest hook: Launch faster without hiring an agency')
+    expect(brief).toContain('Test next: Try a comparison landing page')
   })
 })
