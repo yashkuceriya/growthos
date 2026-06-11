@@ -9,7 +9,7 @@ import { PageHeader } from '@/components/ui/page-header'
 import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { JsonView } from '@/components/ui/json-viewer'
-import { ChevronLeft, FileText, Mail, MessageSquare, Globe, Target, Trophy, Archive, Rocket, Users, Download, ExternalLink, Copy, Link as LinkIcon } from 'lucide-react'
+import { ChevronLeft, FileText, Mail, MessageSquare, Globe, Target, Trophy, Archive, Rocket, Users, Download, ExternalLink, Copy, Link as LinkIcon, ListChecks, CheckCircle2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { ManualMetricsLogger } from '@/components/campaigns/manual-metrics-logger'
 import { LearningSummaryPanel } from '@/components/campaigns/learning-summary'
@@ -73,6 +73,22 @@ interface PersonaLearningMeta {
   personaId: string | null
   personaName: string | null
   insightSignal: string | null
+}
+
+interface ManualTrackerMeta {
+  savedAt: string | null
+  goal: string | null
+  angle: string | null
+  briefMarkdown: string | null
+  tasks: Array<{
+    id: string
+    owner: string
+    title: string
+    detail: string
+    metric: string
+    channel: string | null
+    done: boolean
+  }>
 }
 
 const KIND_LABELS: Record<AssetKind, string> = {
@@ -158,6 +174,7 @@ export default function CampaignDetailPage() {
   const insights = (meta as { insights?: unknown }).insights
   const campaignPersona = readCampaignPersona(meta)
   const personaLearning = readPersonaLearning(meta)
+  const manualTracker = readManualTracker(meta)
 
   return (
     <PageShell>
@@ -224,6 +241,8 @@ export default function CampaignDetailPage() {
       </div>
 
       <PersonaLearningCard persona={campaignPersona} learning={personaLearning} />
+
+      {manualTracker && <ManualTrackerCard tracker={manualTracker} />}
 
       {/* Unified asset board — single tabbed view across every asset type
           attached to the campaign. Stat cards above act as filter chips. */}
@@ -350,6 +369,64 @@ export default function CampaignDetailPage() {
   )
 }
 
+function ManualTrackerCard({ tracker }: { tracker: ManualTrackerMeta }) {
+  const done = tracker.tasks.filter((task) => task.done).length
+  const total = tracker.tasks.length
+  return (
+    <SectionPanel
+      className="mb-4 border-cyan-500/25"
+      title={
+        <span className="flex items-center gap-2">
+          <ListChecks className="h-3.5 w-3.5 text-cyan-300" />
+          Manual Launch Worklog
+          <StatusPill tone={done === total && total > 0 ? 'success' : 'info'}>{done}/{total} done</StatusPill>
+        </span>
+      }
+    >
+      <div className="mb-3 grid gap-3 md:grid-cols-3">
+        <div>
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Goal</div>
+          <p className="text-sm font-semibold text-slate-100">{tracker.goal ?? 'Not set'}</p>
+        </div>
+        <div className="md:col-span-2">
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Angle</div>
+          <p className="line-clamp-2 text-xs leading-5 text-slate-300">{tracker.angle ?? 'Not set'}</p>
+        </div>
+      </div>
+      <div className="grid gap-2 md:grid-cols-2">
+        {tracker.tasks.slice(0, 12).map((task) => (
+          <div key={task.id} className={`rounded-md border p-3 ${task.done ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-slate-800 bg-slate-950/40'}`}>
+            <div className="mb-1 flex flex-wrap items-center gap-2">
+              {task.done ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" /> : <span className="h-3.5 w-3.5 rounded-full border border-slate-600" />}
+              <span className={`text-xs font-semibold ${task.done ? 'text-emerald-200 line-through' : 'text-slate-100'}`}>{task.title}</span>
+              <StatusPill tone="neutral">{task.owner}</StatusPill>
+              {task.channel && <StatusPill tone="info">{task.channel}</StatusPill>}
+            </div>
+            <p className="line-clamp-2 text-[11px] leading-5 text-slate-400">{task.detail}</p>
+            <p className="mt-2 text-[10px] leading-4 text-emerald-300">Metric: {task.metric}</p>
+          </div>
+        ))}
+      </div>
+      {tracker.briefMarkdown && (
+        <button
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(tracker.briefMarkdown!)
+              toast.success('Manual brief copied')
+            } catch {
+              toast.error('Could not copy brief')
+            }
+          }}
+          className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-cyan-500/40 bg-cyan-500/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-cyan-200 hover:bg-cyan-500/15"
+        >
+          <Copy className="h-3.5 w-3.5" /> Copy Saved Brief
+        </button>
+      )}
+      {tracker.savedAt && <p className="mt-2 text-[10px] text-slate-500">Saved {new Date(tracker.savedAt).toLocaleString()}</p>}
+    </SectionPanel>
+  )
+}
+
 function PersonaLearningCard({ persona, learning }: { persona: CampaignPersonaMeta | null; learning: PersonaLearningMeta | null }) {
   return (
     <SectionPanel
@@ -417,6 +494,41 @@ function readPersonaLearning(meta: Record<string, unknown>): PersonaLearningMeta
     personaId: typeof record.persona_id === 'string' ? record.persona_id : null,
     personaName: typeof record.persona_name === 'string' ? record.persona_name : null,
     insightSignal: signal,
+  }
+}
+
+function readManualTracker(meta: Record<string, unknown>): ManualTrackerMeta | null {
+  const raw = meta.manual_launch_tracker
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const record = raw as Record<string, unknown>
+  const tasksRaw = Array.isArray(record.tasks) ? record.tasks : []
+  const tasks = tasksRaw
+    .map((item): ManualTrackerMeta['tasks'][number] | null => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+      const task = item as Record<string, unknown>
+      const id = typeof task.id === 'string' ? task.id : null
+      const title = typeof task.title === 'string' ? task.title : null
+      const detail = typeof task.detail === 'string' ? task.detail : null
+      const metric = typeof task.metric === 'string' ? task.metric : null
+      if (!id || !title || !detail || !metric) return null
+      return {
+        id,
+        owner: typeof task.owner === 'string' ? task.owner : 'Manual',
+        title,
+        detail,
+        metric,
+        channel: typeof task.channel === 'string' ? task.channel : null,
+        done: task.done === true,
+      }
+    })
+    .filter((task): task is ManualTrackerMeta['tasks'][number] => task !== null)
+  if (tasks.length === 0) return null
+  return {
+    savedAt: typeof record.saved_at === 'string' ? record.saved_at : null,
+    goal: typeof record.goal === 'string' ? record.goal : null,
+    angle: typeof record.angle === 'string' ? record.angle : null,
+    briefMarkdown: typeof record.brief_markdown === 'string' ? record.brief_markdown : null,
+    tasks,
   }
 }
 

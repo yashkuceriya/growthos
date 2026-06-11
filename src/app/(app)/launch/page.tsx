@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import type { ReactNode } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useProject } from '@/hooks/use-project'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
@@ -137,6 +137,7 @@ interface LearningSummary {
 export default function LaunchPage() {
   const { activeProject } = useProject()
   const searchParams = useSearchParams()
+  const router = useRouter()
   // Optional re-launch flow: a Campaign Command Center "Re-launch" button
   // routes here with ?campaignId=... so new assets reuse the existing
   // campaign id instead of orphaning under a new row.
@@ -168,6 +169,7 @@ export default function LaunchPage() {
   const [priorLearning, setPriorLearning] = useState<LearningSummary | null>(null)
   const [priorLearningLoading, setPriorLearningLoading] = useState(false)
   const [priorLearningError, setPriorLearningError] = useState<string | null>(null)
+  const [savingManualCampaign, setSavingManualCampaign] = useState(false)
 
   // Agent outputs
   type AgentKey = 'cmo' | 'seo' | 'director' | 'analytics'
@@ -409,6 +411,45 @@ export default function LaunchPage() {
     toast.success('Copied')
   }
 
+  async function saveManualCampaign(payload: {
+    briefMarkdown: string
+    tasks: Array<Record<string, unknown>>
+    channels: ChannelKey[]
+  }) {
+    if (!activeProject) return
+    setSavingManualCampaign(true)
+    try {
+      const res = await fetch('/api/launch/manual-campaign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: activeProject.id,
+          campaignId: reuseCampaignId ?? undefined,
+          name: `Manual Launch · ${activeProject.name}`,
+          channels: payload.channels,
+          goal: goal.trim() || undefined,
+          angle: angle.trim() || undefined,
+          persona: selectedPersona ? {
+            id: selectedPersona.id,
+            name: selectedPersona.name,
+            role: selectedPersona.role,
+            skepticismLevel: selectedPersona.skepticismLevel,
+          } : null,
+          briefMarkdown: payload.briefMarkdown,
+          tasks: payload.tasks,
+        }),
+      })
+      const body = await res.json().catch(() => ({})) as { error?: string; campaign?: { id?: string }; action?: string }
+      if (!res.ok) throw new Error(body.error ?? 'Could not save manual campaign')
+      toast.success(body.action === 'updated' ? 'Campaign worklog updated' : 'Manual campaign saved')
+      if (body.campaign?.id) router.push(`/campaigns/${body.campaign.id}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not save manual campaign')
+    } finally {
+      setSavingManualCampaign(false)
+    }
+  }
+
   if (!activeProject) {
     return <PageShell><p className="text-slate-400">Select a project first</p></PageShell>
   }
@@ -502,6 +543,8 @@ export default function LaunchPage() {
           onChangeAngle={setAngle}
           onReload={() => activeProject && loadPlan(activeProject.id, selectedPersonaId)}
           onCopyBrief={copyText}
+          onSaveManualCampaign={saveManualCampaign}
+          savingManualCampaign={savingManualCampaign}
         />
         </>
       )}
@@ -1041,6 +1084,7 @@ function PlanPreview({
   plan, loading, error, selected, goal, angle,
   projectName, personaName, priorLearning,
   onToggleChannel, onChangeGoal, onChangeAngle, onReload, onCopyBrief,
+  onSaveManualCampaign, savingManualCampaign,
 }: {
   plan: LaunchPlan | null
   loading: boolean
@@ -1056,6 +1100,8 @@ function PlanPreview({
   onChangeAngle: (s: string) => void
   onReload: () => void
   onCopyBrief: (text: string) => void
+  onSaveManualCampaign: (payload: { briefMarkdown: string; tasks: Array<Record<string, unknown>>; channels: ChannelKey[] }) => Promise<void>
+  savingManualCampaign: boolean
 }) {
   const [doneTaskIds, setDoneTaskIds] = useState<Set<string>>(new Set())
 
@@ -1095,6 +1141,23 @@ function PlanPreview({
       angle,
       priorLearning,
     }))
+  }
+  const buildManualPayload = () => {
+    const channels = Array.from(selected)
+    const briefMarkdown = buildLaunchExecutionBrief({
+      plan,
+      selectedChannels: channels,
+      projectName,
+      personaName,
+      goal,
+      angle,
+      priorLearning,
+    })
+    const tasks = checklist.map((task) => ({
+      ...task,
+      done: doneTaskIds.has(task.id),
+    }))
+    return { briefMarkdown, tasks, channels }
   }
   const toggleTask = (id: string) => {
     setDoneTaskIds((prev) => {
@@ -1218,6 +1281,14 @@ function PlanPreview({
           className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-cyan-500/40 bg-cyan-500/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-cyan-200 hover:bg-cyan-500/15"
         >
           <Copy className="h-3.5 w-3.5" /> Copy Local Brief
+        </button>
+        <button
+          onClick={() => onSaveManualCampaign(buildManualPayload())}
+          disabled={savingManualCampaign}
+          className="mt-3 ml-2 inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-200 hover:bg-emerald-500/15 disabled:opacity-50"
+        >
+          {savingManualCampaign ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Rocket className="h-3.5 w-3.5" />}
+          Save to Campaign
         </button>
       </div>
 
