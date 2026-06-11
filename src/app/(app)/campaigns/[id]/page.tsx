@@ -242,7 +242,7 @@ export default function CampaignDetailPage() {
 
       <PersonaLearningCard persona={campaignPersona} learning={personaLearning} />
 
-      {manualTracker && <ManualTrackerCard tracker={manualTracker} />}
+      {manualTracker && <ManualTrackerCard campaignId={campaign.id} tracker={manualTracker} onUpdated={loadAll} />}
 
       {/* Unified asset board — single tabbed view across every asset type
           attached to the campaign. Stat cards above act as filter chips. */}
@@ -369,9 +369,38 @@ export default function CampaignDetailPage() {
   )
 }
 
-function ManualTrackerCard({ tracker }: { tracker: ManualTrackerMeta }) {
+function ManualTrackerCard({
+  campaignId,
+  tracker,
+  onUpdated,
+}: {
+  campaignId: string
+  tracker: ManualTrackerMeta
+  onUpdated: () => Promise<void>
+}) {
+  const [savingTaskId, setSavingTaskId] = useState<string | null>(null)
   const done = tracker.tasks.filter((task) => task.done).length
   const total = tracker.tasks.length
+
+  async function toggleTask(task: ManualTrackerMeta['tasks'][number]) {
+    setSavingTaskId(task.id)
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}/manual-worklog`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId: task.id, done: !task.done }),
+      })
+      const body = await res.json().catch(() => ({})) as { error?: string }
+      if (!res.ok) throw new Error(body.error ?? 'Could not update task')
+      toast.success(task.done ? 'Task reopened' : 'Task completed')
+      await onUpdated()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not update task')
+    } finally {
+      setSavingTaskId(null)
+    }
+  }
+
   return (
     <SectionPanel
       className="mb-4 border-cyan-500/25"
@@ -395,16 +424,24 @@ function ManualTrackerCard({ tracker }: { tracker: ManualTrackerMeta }) {
       </div>
       <div className="grid gap-2 md:grid-cols-2">
         {tracker.tasks.slice(0, 12).map((task) => (
-          <div key={task.id} className={`rounded-md border p-3 ${task.done ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-slate-800 bg-slate-950/40'}`}>
+          <label key={task.id} className={`block rounded-md border p-3 ${task.done ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-slate-800 bg-slate-950/40'}`}>
             <div className="mb-1 flex flex-wrap items-center gap-2">
-              {task.done ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" /> : <span className="h-3.5 w-3.5 rounded-full border border-slate-600" />}
+              <input
+                type="checkbox"
+                checked={task.done}
+                disabled={savingTaskId === task.id}
+                onChange={() => toggleTask(task)}
+                className="h-4 w-4 shrink-0 accent-emerald-500 disabled:opacity-50"
+              />
+              {task.done && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" />}
               <span className={`text-xs font-semibold ${task.done ? 'text-emerald-200 line-through' : 'text-slate-100'}`}>{task.title}</span>
               <StatusPill tone="neutral">{task.owner}</StatusPill>
               {task.channel && <StatusPill tone="info">{task.channel}</StatusPill>}
+              {savingTaskId === task.id && <span className="text-[10px] text-slate-500">Saving...</span>}
             </div>
             <p className="line-clamp-2 text-[11px] leading-5 text-slate-400">{task.detail}</p>
             <p className="mt-2 text-[10px] leading-4 text-emerald-300">Metric: {task.metric}</p>
-          </div>
+          </label>
         ))}
       </div>
       {tracker.briefMarkdown && (
