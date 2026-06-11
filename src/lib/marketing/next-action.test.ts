@@ -56,6 +56,28 @@ describe('nextBestAction', () => {
     expect(action.href).toContain('campaignId=camp_1')
   })
 
+  it('asks to complete manual worklog tasks before relaunching a no-asset manual campaign', () => {
+    const action = nextBestAction({
+      hasProject: true, projectWebsite: 'https://x.com', blueprint: READY_BLUEPRINT,
+      campaignCount: 1, latestCampaignId: 'camp_1', latestCampaignAssetCount: 0,
+      manualWorklogTaskCount: 4, manualWorklogDoneCount: 2, nextManualWorklogTaskTitle: 'Ship email asset',
+    })
+    expect(action.id).toBe('complete_manual_worklog')
+    expect(action.title).toContain('2 manual')
+    expect(action.reason).toContain('Ship email asset')
+    expect(action.href).toBe('/campaigns/camp_1')
+  })
+
+  it('prompts for metrics when a manual worklog is complete but not measured', () => {
+    const action = nextBestAction({
+      hasProject: true, projectWebsite: 'https://x.com', blueprint: READY_BLUEPRINT,
+      campaignCount: 1, latestCampaignId: 'camp_1', latestCampaignAssetCount: 0,
+      manualWorklogTaskCount: 4, manualWorklogDoneCount: 4,
+    })
+    expect(action.id).toBe('log_metrics')
+    expect(action.href).toBe('/campaigns/camp_1')
+  })
+
   it('prompts to review ads when generated copies are waiting', () => {
     const action = nextBestAction({
       hasProject: true, projectWebsite: 'https://x.com', blueprint: READY_BLUEPRINT,

@@ -56,7 +56,7 @@ export async function GET(request: Request) {
   // "current operating context" for the snapshot.
   const latestCampaignPromise = supabase
     .from('campaigns')
-    .select('id')
+    .select('id, metadata')
     .eq('project_id', projectId)
     .order('created_at', { ascending: false })
     .limit(1)
@@ -73,21 +73,27 @@ export async function GET(request: Request) {
     memoryPromise, latestCampaignPromise, campaignCountPromise, budgetPromise,
   ])
 
-  const latestCampaignRow = (latestCampaign as { data?: { id: string } | null } | null)?.data ?? null
+  const latestCampaignRow = (latestCampaign as { data?: { id: string; metadata: Record<string, unknown> | null } | null } | null)?.data ?? null
   const latestCampaignId = latestCampaignRow?.id ?? null
 
   let focusCampaignId: string | null = null
+  let focusCampaignMetadata: Record<string, unknown> | null = null
   if (focusCampaignIdParam) {
     const { data: camp } = await supabase
       .from('campaigns')
-      .select('id, project_id')
+      .select('id, project_id, metadata')
       .eq('id', focusCampaignIdParam)
       .eq('user_id', user.id)
-      .maybeSingle() as { data: { id: string; project_id: string } | null }
-    if (camp && camp.project_id === projectId) focusCampaignId = camp.id
+      .maybeSingle() as { data: { id: string; project_id: string; metadata: Record<string, unknown> | null } | null }
+    if (camp && camp.project_id === projectId) {
+      focusCampaignId = camp.id
+      focusCampaignMetadata = camp.metadata
+    }
   }
 
   const effectiveCampaignId = focusCampaignId ?? latestCampaignId
+  const effectiveCampaignMetadata = focusCampaignId ? focusCampaignMetadata : latestCampaignRow?.metadata ?? null
+  const manualWorklog = readManualWorklog(effectiveCampaignMetadata)
 
   // Per-campaign asset + needs-review snapshot. Skipped when no campaigns.
   let latestCampaignAssetCount = 0
@@ -166,6 +172,9 @@ export async function GET(request: Request) {
     campaignCount: (campaignCount as unknown as { count?: number | null }).count ?? 0,
     latestCampaignId: effectiveCampaignId,
     latestCampaignAssetCount,
+    manualWorklogTaskCount: manualWorklog.total,
+    manualWorklogDoneCount: manualWorklog.done,
+    nextManualWorklogTaskTitle: manualWorklog.nextTitle,
     adsNeedingReview,
     socialPostsDraft,
     socialPostsScheduled,
@@ -194,4 +203,21 @@ function socialLimit(platform: string | null): number {
 function bestChannel(performance: Array<{ channel: string; conversions: number; roas: number | null; clicks: number }>): string | null {
   const winner = performance.find((row) => row.conversions > 0 || (row.roas ?? 0) > 0 || row.clicks > 0)
   return winner?.channel ?? null
+}
+
+function readManualWorklog(metadata: Record<string, unknown> | null | undefined): { total: number; done: number; nextTitle: string | null } {
+  const raw = metadata?.manual_launch_tracker
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { total: 0, done: 0, nextTitle: null }
+  const tasks = Array.isArray((raw as Record<string, unknown>).tasks)
+    ? (raw as Record<string, unknown>).tasks as unknown[]
+    : []
+  let done = 0
+  let nextTitle: string | null = null
+  for (const task of tasks) {
+    if (!task || typeof task !== 'object' || Array.isArray(task)) continue
+    const row = task as Record<string, unknown>
+    if (row.done === true) done += 1
+    else if (!nextTitle && typeof row.title === 'string') nextTitle = row.title
+  }
+  return { total: tasks.length, done, nextTitle }
 }

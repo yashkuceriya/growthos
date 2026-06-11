@@ -30,6 +30,9 @@ export interface NextActionSnapshot {
   campaignCount: number
   latestCampaignId: string | null
   latestCampaignAssetCount: number
+  manualWorklogTaskCount: number
+  manualWorklogDoneCount: number
+  nextManualWorklogTaskTitle: string | null
   // Number of ad copies needing operator review (status='evaluator_pass' but
   // not yet promoted or rejected).
   adsNeedingReview: number
@@ -60,6 +63,9 @@ const EMPTY_SNAPSHOT: NextActionSnapshot = {
   campaignCount: 0,
   latestCampaignId: null,
   latestCampaignAssetCount: 0,
+  manualWorklogTaskCount: 0,
+  manualWorklogDoneCount: 0,
+  nextManualWorklogTaskTitle: null,
   adsNeedingReview: 0,
   socialPostsDraft: 0,
   socialPostsScheduled: 0,
@@ -126,8 +132,26 @@ export function nextBestAction(input: Partial<NextActionSnapshot>): NextBestActi
     }
   }
 
-  // Campaign exists but no assets attached → re-launch into the campaign.
-  if (s.latestCampaignAssetCount === 0 && s.latestCampaignId) {
+  // Manual/local campaign exists and has unfinished operating tasks. This
+  // beats relaunching because the operator deliberately chose a no-key
+  // execution path.
+  if (s.manualWorklogTaskCount > 0 && s.manualWorklogDoneCount < s.manualWorklogTaskCount && s.latestCampaignId) {
+    const remaining = s.manualWorklogTaskCount - s.manualWorklogDoneCount
+    return {
+      id: 'complete_manual_worklog',
+      priority: 'medium',
+      title: `Complete ${remaining} manual launch task${remaining === 1 ? '' : 's'}`,
+      reason: s.nextManualWorklogTaskTitle
+        ? `Next task: ${s.nextManualWorklogTaskTitle}. Completing worklog tasks keeps the campaign operating loop moving before metrics are logged.`
+        : 'Manual launch tasks are still open. Finish them before measuring or relaunching.',
+      ctaLabel: 'Open worklog',
+      href: `/campaigns/${s.latestCampaignId}`,
+    }
+  }
+
+  // Campaign exists but no assets or manual worklog attached → re-launch
+  // into the campaign.
+  if (s.latestCampaignAssetCount === 0 && s.manualWorklogTaskCount === 0 && s.latestCampaignId) {
     return {
       id: 'attach_assets',
       priority: 'high',

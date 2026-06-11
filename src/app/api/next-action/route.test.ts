@@ -44,7 +44,7 @@ vi.mock('@/lib/budget-guard', () => ({
 interface State {
   user: { id: string } | null
   projectRow: { id: string; website: string | null } | null
-  latestCampaign: { id: string } | null
+  latestCampaign: { id: string; metadata?: Record<string, unknown> | null } | null
   campaignCount: number | null
   fanout: Record<string, { count?: number | null; data?: unknown[] }>
 }
@@ -124,7 +124,7 @@ import { GET } from './route'
 beforeEach(() => {
   state.user = { id: 'u1' }
   state.projectRow = { id: 'proj_1', website: 'https://example.com' }
-  state.latestCampaign = { id: 'camp_latest' }
+  state.latestCampaign = { id: 'camp_latest', metadata: null }
   state.campaignCount = 2
   state.fanout = {
     ad_copies: { data: [{ status: 'evaluator_pass' }] },
@@ -154,5 +154,34 @@ describe('GET /api/next-action', () => {
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.action.id).toBe('review_ads')
+  })
+
+  it('returns manual worklog task when latest campaign has unfinished manual tasks and no generated assets', async () => {
+    state.latestCampaign = {
+      id: 'camp_manual',
+      metadata: {
+        manual_launch_tracker: {
+          tasks: [
+            { id: 'strategy-angle', title: 'Lock angle', done: true },
+            { id: 'channel-email', title: 'Ship email asset', done: false },
+          ],
+        },
+      },
+    }
+    state.fanout = {
+      ad_copies: { data: [] },
+      social_posts: { data: [], count: 0 },
+      campaign_metrics: { count: 0 },
+      content_pieces: { data: [] },
+      landing_pages: { count: 0 },
+    }
+
+    const res = await GET(new Request('https://app.test/api/next-action?projectId=proj_1'))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.action.id).toBe('complete_manual_worklog')
+    expect(body.action.reason).toContain('Ship email asset')
+    expect(body.snapshot.manualWorklogTaskCount).toBe(2)
+    expect(body.snapshot.manualWorklogDoneCount).toBe(1)
   })
 })
