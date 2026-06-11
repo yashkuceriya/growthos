@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils'
 import { QualityVerdict } from '@/components/marketing/quality-verdict'
 import type { GeneratedQualityScore } from '@/lib/marketing/quality'
 import type { MarketingPersona } from '@/lib/marketing/personas'
-import { buildLaunchExecutionBrief } from '@/lib/launch/plan'
+import { buildLaunchExecutionBrief, buildLaunchExecutionChecklist } from '@/lib/launch/plan'
 
 type ChannelKey = 'meta' | 'linkedin' | 'tiktok' | 'twitter' | 'reddit' | 'email' | 'blog' | 'landing'
 type ChannelStatus = 'pending' | 'generating' | 'ready' | 'failed'
@@ -1057,6 +1057,8 @@ function PlanPreview({
   onReload: () => void
   onCopyBrief: (text: string) => void
 }) {
+  const [doneTaskIds, setDoneTaskIds] = useState<Set<string>>(new Set())
+
   if (loading && !plan) {
     return (
       <div className="mb-4 rounded-md border border-slate-800 bg-slate-900/40 p-4 text-xs text-slate-400">
@@ -1076,6 +1078,13 @@ function PlanPreview({
   if (!plan) return null
 
   const goalOptions = ['awareness', 'engagement', 'conversion']
+  const checklist = buildLaunchExecutionChecklist({
+    plan,
+    selectedChannels: Array.from(selected),
+    goal,
+    angle,
+  })
+  const completedTaskCount = checklist.filter((task) => doneTaskIds.has(task.id)).length
   const copyLocalBrief = () => {
     onCopyBrief(buildLaunchExecutionBrief({
       plan,
@@ -1086,6 +1095,14 @@ function PlanPreview({
       angle,
       priorLearning,
     }))
+  }
+  const toggleTask = (id: string) => {
+    setDoneTaskIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
   return (
@@ -1202,6 +1219,52 @@ function PlanPreview({
         >
           <Copy className="h-3.5 w-3.5" /> Copy Local Brief
         </button>
+      </div>
+
+      <div className="mb-4 rounded-md border border-slate-800 bg-slate-950/40 p-3">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <ListChecks className="h-3.5 w-3.5 text-emerald-300" />
+            <span className="text-xs font-semibold text-slate-100">Manual Launch Tracker</span>
+            <StatusPill tone={completedTaskCount === checklist.length ? 'success' : 'neutral'}>
+              {completedTaskCount}/{checklist.length} done
+            </StatusPill>
+          </div>
+          <span className="text-[10px] text-slate-500">In-session checklist · metrics feed the learning loop later</span>
+        </div>
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+          {checklist.map((task) => {
+            const done = doneTaskIds.has(task.id)
+            return (
+              <label
+                key={task.id}
+                className={cn(
+                  'flex min-h-24 items-start gap-3 rounded-md border p-3 transition-colors',
+                  done ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-slate-800 bg-slate-900/50 hover:border-slate-700',
+                )}
+              >
+                <input
+                  type="checkbox"
+                  checked={done}
+                  onChange={() => toggleTask(task.id)}
+                  className="mt-1 h-4 w-4 shrink-0 accent-emerald-500"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="mb-1 flex flex-wrap items-center gap-2">
+                    <span className={cn('text-xs font-semibold', done ? 'text-emerald-200 line-through' : 'text-slate-100')}>
+                      {task.title}
+                    </span>
+                    <StatusPill tone={task.owner === 'Measurement' ? 'info' : task.owner === 'Answer Engine' ? 'accent' : 'neutral'}>
+                      {task.owner}
+                    </StatusPill>
+                  </span>
+                  <span className="block text-[11px] leading-5 text-slate-400">{task.detail}</span>
+                  <span className="mt-2 block text-[10px] leading-4 text-emerald-300">Metric: {task.metric}</span>
+                </span>
+              </label>
+            )
+          })}
+        </div>
       </div>
 
       <div className="mb-4">

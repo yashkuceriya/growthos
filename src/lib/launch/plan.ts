@@ -43,6 +43,15 @@ export interface LaunchExperiment {
   successMetric: string
 }
 
+export interface LaunchExecutionTask {
+  id: string
+  owner: 'Strategy' | 'Channel' | 'Measurement' | 'Answer Engine'
+  title: string
+  detail: string
+  metric: string
+  channel?: LaunchChannel
+}
+
 export interface AnswerEnginePlan {
   recommended: boolean
   reason: string
@@ -101,6 +110,13 @@ export interface BuildLaunchExecutionBriefArgs {
   goal?: string | null
   angle?: string | null
   priorLearning?: LaunchExecutionLearning | null
+}
+
+export interface BuildLaunchExecutionChecklistArgs {
+  plan: LaunchPlan
+  selectedChannels?: LaunchChannel[]
+  goal?: string | null
+  angle?: string | null
 }
 
 export function buildLaunchPlan({ memory, persona }: BuildLaunchPlanArgs): LaunchPlan {
@@ -189,6 +205,7 @@ export function buildLaunchExecutionBrief({
   const channelNames = channels.map((c) => channelLabel(c.channel))
   const selectedGoal = goal?.trim() || plan.defaultGoal
   const selectedAngle = angle?.trim() || plan.defaultAngle || plan.suggestedAngles[0] || 'Pick the strongest problem/outcome angle before publishing.'
+  const checklist = buildLaunchExecutionChecklist({ plan, selectedChannels, goal: selectedGoal, angle: selectedAngle })
   const doNow = priorLearning?.decisionLoop?.doNow ?? []
   const stopDoing = priorLearning?.decisionLoop?.stopDoing ?? []
   const testNext = priorLearning?.decisionLoop?.testNext ?? priorLearning?.recommendedNext ?? []
@@ -212,6 +229,9 @@ export function buildLaunchExecutionBrief({
     '',
     '## Channel actions',
     ...channels.map((c) => `- ${channelLabel(c.channel)} (${c.tier}): ${c.reason}`),
+    '',
+    '## Manual checklist',
+    ...checklist.map((task) => `- [ ] ${task.title}: ${task.detail} Metric: ${task.metric}`),
     '',
     '## Experiments',
     ...plan.experiments.map((e) => `- ${e.name}: ${e.hypothesis} Success metric: ${e.successMetric}`),
@@ -247,6 +267,61 @@ export function buildLaunchExecutionBrief({
   }
 
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+export function buildLaunchExecutionChecklist({
+  plan,
+  selectedChannels,
+  goal,
+  angle,
+}: BuildLaunchExecutionChecklistArgs): LaunchExecutionTask[] {
+  const channels = selectedChannels?.length
+    ? selectedChannels
+    : plan.defaultChannels
+  const selectedChannelRecs = plan.channels.filter((c) => channels.includes(c.channel))
+  const selectedGoal = goal?.trim() || plan.defaultGoal
+  const selectedAngle = angle?.trim() || plan.defaultAngle || plan.suggestedAngles[0] || 'the selected narrative angle'
+  const tasks: LaunchExecutionTask[] = [
+    {
+      id: 'strategy-angle',
+      owner: 'Strategy',
+      title: 'Lock the launch angle',
+      detail: `Rewrite the angle into one sentence naming the buyer, pain, outcome, and proof: ${selectedAngle}`,
+      metric: 'Angle approved for clarity before publishing',
+    },
+  ]
+
+  for (const rec of selectedChannelRecs) {
+    const play = channelExecutionPlay(rec.channel, selectedGoal)
+    tasks.push({
+      id: `channel-${rec.channel}`,
+      owner: 'Channel',
+      channel: rec.channel,
+      title: `Ship ${channelLabel(rec.channel)} asset`,
+      detail: play.action,
+      metric: play.metric,
+    })
+  }
+
+  if (plan.answerEngine.recommended) {
+    tasks.push({
+      id: 'answer-engine',
+      owner: 'Answer Engine',
+      title: 'Publish answer-engine support',
+      detail: `Create ${plan.answerEngine.assets.slice(0, 2).join(' and ')} from the launch angle.`,
+      metric: 'At least one FAQ, comparison, or answer snippet is live',
+    })
+  }
+
+  tasks.push({
+    id: 'measurement-log',
+    owner: 'Measurement',
+    title: 'Log campaign metrics',
+    detail: 'Record first signals on the campaign page after 24-48 hours so the learning loop can improve the next launch.',
+    metric: plan.experiments[0]?.successMetric ?? plan.primaryKpi,
+  })
+
+  return tasks
 }
 
 // Pulls 3-4 narrative-angle starters out of memory. Prefers angles distilled
@@ -346,6 +421,51 @@ function channelLabel(channel: LaunchChannel): string {
     case 'email': return 'email lifecycle'
     case 'blog': return 'long-form blog / SEO'
     case 'landing': return 'landing page'
+  }
+}
+
+function channelExecutionPlay(channel: LaunchChannel, goal: string): { action: string; metric: string } {
+  switch (channel) {
+    case 'meta':
+      return {
+        action: 'Publish one paid or manual Meta creative using the strongest hook. Keep spend tiny until CTR and lead quality show signal.',
+        metric: goal === 'awareness' ? 'CPM, thumb-stop rate, and CTR' : 'CTR, cost per lead, and landing-page conversion',
+      }
+    case 'linkedin':
+      return {
+        action: 'Post the practical founder/operator version first, then reuse the same hook as sponsored content only if organic comments or clicks appear.',
+        metric: 'Comments, saves, profile clicks, and qualified leads',
+      }
+    case 'tiktok':
+      return {
+        action: 'Record the hook as a native short video. Test organically before considering paid boost.',
+        metric: '3-second view rate, completion rate, comments, and clicks',
+      }
+    case 'twitter':
+      return {
+        action: 'Publish the hook as a standalone post, then expand into a thread if replies or saves show interest.',
+        metric: 'Replies, saves, profile visits, and link clicks',
+      }
+    case 'reddit':
+      return {
+        action: 'Post as a useful question or field note in one relevant community. Reply to every serious comment before posting anywhere else.',
+        metric: 'Upvotes, comments, referral clicks, and objection themes',
+      }
+    case 'email':
+      return {
+        action: 'Send the most direct version to the warmest list segment first. Watch replies before automating the whole sequence.',
+        metric: 'Open rate, click rate, replies, and unsubscribes',
+      }
+    case 'blog':
+      return {
+        action: 'Publish the answer-first article with FAQ and comparison sections, then link it from the landing page.',
+        metric: 'Search impressions, clicks, time on page, and assisted conversions',
+      }
+    case 'landing':
+      return {
+        action: 'Update the landing hero to match the chosen angle and route all manual traffic through tracked links.',
+        metric: 'Visits, CTA clicks, lead captures, and conversion rate',
+      }
   }
 }
 

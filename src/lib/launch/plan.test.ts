@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildLaunchExecutionBrief, buildLaunchPlan, isLaunchChannel, LAUNCH_CHANNELS } from './plan'
+import { buildLaunchExecutionBrief, buildLaunchExecutionChecklist, buildLaunchPlan, isLaunchChannel, LAUNCH_CHANNELS } from './plan'
 import type { MarketingMemory } from '@/lib/marketing/memory'
 import type { MarketingPersona } from '@/lib/marketing/personas'
 
@@ -269,6 +269,8 @@ describe('buildLaunchPlan', () => {
     expect(brief).toContain('landing page')
     expect(brief).toContain('- long-form blog / SEO (')
     expect(brief).toContain('- landing page (')
+    expect(brief).toContain('## Manual checklist')
+    expect(brief).toContain('- [ ] Ship long-form blog / SEO asset')
     expect(brief).toContain('## Next 48 hours')
   })
 
@@ -294,5 +296,23 @@ describe('buildLaunchPlan', () => {
     expect(brief).toContain('Avoid: tiktok: low-fit audience')
     expect(brief).toContain('Strongest hook: Launch faster without hiring an agency')
     expect(brief).toContain('Test next: Try a comparison landing page')
+  })
+
+  it('builds manual execution tasks and metrics for selected channels', () => {
+    const plan = buildLaunchPlan({ memory: makeMemory() })
+
+    const checklist = buildLaunchExecutionChecklist({
+      plan,
+      selectedChannels: ['email', 'landing'],
+      goal: 'conversion',
+      angle: 'Turn launch chaos into one operating loop',
+    })
+
+    expect(checklist[0]?.id).toBe('strategy-angle')
+    expect(checklist[0]?.detail).toContain('Turn launch chaos into one operating loop')
+    expect(checklist.some((task) => task.id === 'channel-email' && task.metric.includes('Open rate'))).toBe(true)
+    expect(checklist.some((task) => task.id === 'channel-landing' && task.metric.includes('conversion rate'))).toBe(true)
+    expect(checklist.some((task) => task.id === 'measurement-log')).toBe(true)
+    expect(checklist.some((task) => task.id === 'channel-meta')).toBe(false)
   })
 })
