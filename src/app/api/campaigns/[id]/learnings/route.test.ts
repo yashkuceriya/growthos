@@ -117,7 +117,33 @@ describe('GET /api/campaigns/[id]/learnings', () => {
     expect(body.summary.strongestHook).toBe('Founder-built')
     expect(body.summary.inputCounts.metrics).toBe(1)
     expect(body.summary.inputCounts.ads).toBe(1)
+    expect(body.summary.inputCounts.manualTasks).toBe(0)
     expect(state.updateCalls.length).toBe(1)
     expect(state.updateCalls[0].metadata.learning_summary).toBeDefined()
+  })
+
+  it('includes completed manual worklog tasks in the learning summary', async () => {
+    state.campaignRow = {
+      id: 'camp_1',
+      project_id: 'proj_1',
+      metadata: {
+        manual_launch_tracker: {
+          tasks: [
+            { id: 'email', title: 'Ship email asset', detail: 'Send the sequence', metric: 'Replies', channel: 'email', done: true },
+            { id: 'social', title: 'Post thread', detail: 'Publish launch post', metric: 'Clicks', channel: 'social', done: false },
+          ],
+        },
+      },
+    }
+    state.table.campaign_metrics = { data: [], error: null }
+    state.table.ad_copies = { data: [], error: null }
+
+    const res = await GET(new Request('https://app.test/api'), ctx('camp_1'))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.summary.inputCounts.manualTasks).toBe(1)
+    expect(body.summary.recommendedNext.join(' | ')).toMatch(/log manual results/i)
+    const persisted = state.updateCalls[0].metadata.learning_summary as { inputCounts: { manualTasks: number } }
+    expect(persisted.inputCounts.manualTasks).toBe(1)
   })
 })

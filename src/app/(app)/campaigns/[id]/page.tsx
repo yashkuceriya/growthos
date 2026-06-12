@@ -16,6 +16,7 @@ import { LearningSummaryPanel } from '@/components/campaigns/learning-summary'
 import { LaunchScheduleStrip } from '@/components/campaigns/launch-schedule-strip'
 import { NextBestActionPanel } from '@/components/dashboard/next-best-action'
 import { buildAssetTrackingUrl, campaignSlugFor, composerLabelFor, composerLinkFor } from '@/lib/publishing/links'
+import { readManualWorklog, type ManualWorklog } from '@/lib/launch/manual-worklog'
 
 interface Campaign {
   id: string
@@ -75,21 +76,7 @@ interface PersonaLearningMeta {
   insightSignal: string | null
 }
 
-interface ManualTrackerMeta {
-  savedAt: string | null
-  goal: string | null
-  angle: string | null
-  briefMarkdown: string | null
-  tasks: Array<{
-    id: string
-    owner: string
-    title: string
-    detail: string
-    metric: string
-    channel: string | null
-    done: boolean
-  }>
-}
+type ManualTrackerMeta = ManualWorklog
 
 const KIND_LABELS: Record<AssetKind, string> = {
   ad: 'Ads',
@@ -174,7 +161,7 @@ export default function CampaignDetailPage() {
   const insights = (meta as { insights?: unknown }).insights
   const campaignPersona = readCampaignPersona(meta)
   const personaLearning = readPersonaLearning(meta)
-  const manualTracker = readManualTracker(meta)
+  const manualTracker = readManualWorklog(meta)
 
   return (
     <PageShell>
@@ -531,41 +518,6 @@ function readPersonaLearning(meta: Record<string, unknown>): PersonaLearningMeta
     personaId: typeof record.persona_id === 'string' ? record.persona_id : null,
     personaName: typeof record.persona_name === 'string' ? record.persona_name : null,
     insightSignal: signal,
-  }
-}
-
-function readManualTracker(meta: Record<string, unknown>): ManualTrackerMeta | null {
-  const raw = meta.manual_launch_tracker
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
-  const record = raw as Record<string, unknown>
-  const tasksRaw = Array.isArray(record.tasks) ? record.tasks : []
-  const tasks = tasksRaw
-    .map((item): ManualTrackerMeta['tasks'][number] | null => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) return null
-      const task = item as Record<string, unknown>
-      const id = typeof task.id === 'string' ? task.id : null
-      const title = typeof task.title === 'string' ? task.title : null
-      const detail = typeof task.detail === 'string' ? task.detail : null
-      const metric = typeof task.metric === 'string' ? task.metric : null
-      if (!id || !title || !detail || !metric) return null
-      return {
-        id,
-        owner: typeof task.owner === 'string' ? task.owner : 'Manual',
-        title,
-        detail,
-        metric,
-        channel: typeof task.channel === 'string' ? task.channel : null,
-        done: task.done === true,
-      }
-    })
-    .filter((task): task is ManualTrackerMeta['tasks'][number] => task !== null)
-  if (tasks.length === 0) return null
-  return {
-    savedAt: typeof record.saved_at === 'string' ? record.saved_at : null,
-    goal: typeof record.goal === 'string' ? record.goal : null,
-    angle: typeof record.angle === 'string' ? record.angle : null,
-    briefMarkdown: typeof record.brief_markdown === 'string' ? record.brief_markdown : null,
-    tasks,
   }
 }
 

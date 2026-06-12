@@ -7,6 +7,7 @@ function baseInputs(overrides: Partial<LearningSummaryInputs> = {}): LearningSum
     ads: [],
     social: [],
     email: [],
+    manualTasks: [],
     insights: { current: null },
     ...overrides,
   }
@@ -25,7 +26,7 @@ describe('summarizeCampaign', () => {
       stopDoing: [],
       testNext: ['Run a narrow hook test with one owned channel and one social channel before widening spend.'],
     })
-    expect(s.inputCounts).toEqual({ metrics: 0, ads: 0, social: 0, email: 0 })
+    expect(s.inputCounts).toEqual({ metrics: 0, ads: 0, social: 0, email: 0, manualTasks: 0 })
   })
 
   it('picks the channel with the highest ROAS as best', () => {
@@ -135,6 +136,20 @@ describe('summarizeCampaign', () => {
     expect(s.recommendedNext.some((r) => /promote a winning/i.test(r))).toBe(true)
   })
 
+  it('turns completed manual worklog tasks into measurement guidance', () => {
+    const s = summarizeCampaign(baseInputs({
+      manualTasks: [
+        { id: 'email', title: 'Ship email asset', metric: 'Replies', channel: 'email', completedAt: '2026-06-12T01:00:00.000Z' },
+        { id: 'social', title: 'Post launch thread', metric: 'Clicks', channel: 'social', completedAt: '2026-06-12T02:00:00.000Z' },
+      ],
+    }))
+
+    expect(s.inputCounts.manualTasks).toBe(2)
+    expect(s.recommendedNext.join(' | ')).toMatch(/log manual results/i)
+    expect(s.decisionLoop.doNow.join(' | ')).toMatch(/completed manual launch tasks into metrics/i)
+    expect(s.reusableStyleNotes.join(' | ')).toMatch(/email: Ship email asset/i)
+  })
+
   it('learningSummaryToPrompt returns null for bad input', () => {
     expect(learningSummaryToPrompt(null)).toBeNull()
     expect(learningSummaryToPrompt({})).toBeNull()
@@ -154,6 +169,7 @@ describe('summarizeCampaign', () => {
         testNext: ['Try LinkedIn'],
       },
       reusableStyleNotes: ['Tone: direct'],
+      inputCounts: { metrics: 0, ads: 0, social: 0, email: 0, manualTasks: 2 },
     })
     expect(text).toContain('Best channel: meta')
     expect(text).toContain('Underperforming channel: twitter')
@@ -162,6 +178,7 @@ describe('summarizeCampaign', () => {
     expect(text).toContain('Do now: Use the winning headline')
     expect(text).toContain('Stop doing: Pause twitter')
     expect(text).toContain('Tone: direct')
+    expect(text).toContain('Manual launch tasks completed: 2')
   })
 
   it('counts inputs accurately', () => {
@@ -175,8 +192,9 @@ describe('summarizeCampaign', () => {
       ],
       social: [{ id: 's1', platform: 'x', content: 'y', is_winner: false, engagement: null }],
       email: [],
+      manualTasks: [],
       insights: { current: null },
     })
-    expect(s.inputCounts).toEqual({ metrics: 1, ads: 2, social: 1, email: 0 })
+    expect(s.inputCounts).toEqual({ metrics: 1, ads: 2, social: 1, email: 0, manualTasks: 0 })
   })
 })

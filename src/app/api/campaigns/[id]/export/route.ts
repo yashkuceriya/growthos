@@ -15,6 +15,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { buildAssetTrackingUrl, campaignSlugFor } from '@/lib/publishing/links'
 import { summarizeCampaign, type LearningSummary, type LearningSummaryInputs } from '@/lib/campaigns/learning'
+import { completedManualWorklogTasks, readManualWorklog } from '@/lib/launch/manual-worklog'
 
 export async function GET(_request: Request, ctx: { params: Promise<{ id: string }> }) {
   const supabase = await createClient()
@@ -65,6 +66,13 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
     ads: (adRows ?? []) as unknown as LearningSummaryInputs['ads'],
     social: (socialRows ?? []) as unknown as LearningSummaryInputs['social'],
     email: [],
+    manualTasks: completedManualWorklogTasks(readManualWorklog(campaign.metadata)).map((task) => ({
+      id: task.id,
+      title: task.title,
+      metric: task.metric,
+      channel: task.channel,
+      completedAt: task.completedAt,
+    })),
     insights: {
       current: readCurrentInsights((project as { brand_voice?: Record<string, unknown> } | null)?.brand_voice ?? null),
     },

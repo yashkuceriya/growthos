@@ -53,6 +53,14 @@ export interface LearningMetricInput extends MetricRow {
   date: string
 }
 
+export interface LearningManualTaskInput {
+  id: string
+  title: string
+  metric: string
+  channel: string | null
+  completedAt: string | null
+}
+
 export interface LearningInsightsInput {
   // Prior launch lessons from brand_voice.insights.current — best-effort,
   // we accept anything shaped roughly like the existing payload.
@@ -64,6 +72,7 @@ export interface LearningSummaryInputs {
   ads: LearningAdInput[]
   social: LearningSocialInput[]
   email: LearningEmailInput[]
+  manualTasks: LearningManualTaskInput[]
   insights: LearningInsightsInput
 }
 
@@ -99,6 +108,7 @@ export interface LearningSummary {
     ads: number
     social: number
     email: number
+    manualTasks: number
   }
 }
 
@@ -272,6 +282,13 @@ function pickRecommendedNext(inputs: LearningSummaryInputs, best: BestChannel | 
   if (noWinners && (inputs.social.length > 0 || inputs.email.length > 0)) {
     recs.push('Promote a winning post or email so future generations copy what worked.')
   }
+  if (inputs.manualTasks.length > 0 && inputs.metrics.length === 0) {
+    recs.push('Log manual results for the completed worklog tasks so the next launch can learn from real outcomes.')
+  }
+  const strongestManualChannel = mostCommonManualChannel(inputs.manualTasks)
+  if (strongestManualChannel && !best) {
+    recs.push(`Use ${strongestManualChannel} as the next manual follow-up channel, then compare it against one alternate channel.`)
+  }
   return recs.slice(0, 5)
 }
 
@@ -294,6 +311,11 @@ function pickReusableStyleNotes(inputs: LearningSummaryInputs): string[] {
   if (winnerCount > 0) {
     notes.push(`${winnerCount} winning asset${winnerCount === 1 ? '' : 's'} are already feeding back into style memory.`)
   }
+  const completedManual = inputs.manualTasks.slice(0, 3)
+  for (const task of completedManual) {
+    const channel = task.channel ? `${task.channel}: ` : ''
+    notes.push(`Manual task completed: ${channel}${task.title}`)
+  }
   return notes.slice(0, 5)
 }
 
@@ -312,6 +334,9 @@ function buildDecisionLoop(
   if (best) doNow.push(`Shift the next launch toward ${best.channel}; ${best.reason.toLowerCase()}`)
   if (strongestHook) doNow.push(`Reuse this hook family: ${strongestHook}`)
   if (bestAsset) doNow.push(`Use ${bestAsset.label} as the creative reference for the next asset batch.`)
+  if (inputs.manualTasks.length > 0 && inputs.metrics.length === 0) {
+    doNow.push('Turn completed manual launch tasks into metrics before changing the strategy.')
+  }
 
   if (worst) stopDoing.push(`Pause or rewrite ${worst.channel}; ${worst.reason.toLowerCase()}`)
   if (inputs.ads.some((ad) => ad.status === 'generated')) {
@@ -347,6 +372,7 @@ export function summarizeCampaign(inputs: LearningSummaryInputs): LearningSummar
       ads: inputs.ads.length,
       social: inputs.social.length,
       email: inputs.email.length,
+      manualTasks: inputs.manualTasks.length,
     },
   }
 }
@@ -389,10 +415,23 @@ export function learningSummaryToPrompt(summary: unknown): string | null {
     const notes = s.reusableStyleNotes.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).slice(0, 5)
     if (notes.length) lines.push(`Reusable style notes: ${notes.join(' · ')}`)
   }
+  const counts = s.inputCounts
+  if (counts && typeof counts === 'object' && typeof counts.manualTasks === 'number' && counts.manualTasks > 0) {
+    lines.push(`Manual launch tasks completed: ${counts.manualTasks}`)
+  }
   if (lines.length === 0) return null
   return lines.join('\n')
 }
 
 function uniqueStrings(values: string[]): string[] {
   return values.map((value) => value.trim()).filter((value, index, arr) => value && arr.indexOf(value) === index)
+}
+
+function mostCommonManualChannel(tasks: LearningManualTaskInput[]): string | null {
+  const counts = new Map<string, number>()
+  for (const task of tasks) {
+    if (!task.channel) continue
+    counts.set(task.channel, (counts.get(task.channel) ?? 0) + 1)
+  }
+  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null
 }

@@ -12,6 +12,7 @@
 // RLS-scoped via the session client; ownership is double-checked up front.
 import { createClient } from '@/lib/supabase/server'
 import { summarizeCampaign, type LearningSummaryInputs } from '@/lib/campaigns/learning'
+import { completedManualWorklogTasks, readManualWorklog } from '@/lib/launch/manual-worklog'
 
 export async function GET(_request: Request, ctx: { params: Promise<{ id: string }> }) {
   const supabase = await createClient()
@@ -86,6 +87,13 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
       subject: (row.subject as string | null) ?? null,
       is_winner: (row.is_winner as boolean | null) ?? false,
     }))),
+    manualTasks: completedManualWorklogTasks(readManualWorklog(campaign.metadata)).map((task) => ({
+      id: task.id,
+      title: task.title,
+      metric: task.metric,
+      channel: task.channel,
+      completedAt: task.completedAt,
+    })),
     insights: {
       current: readCurrentInsights((projectRes as { data?: { brand_voice?: Record<string, unknown> } | null }).data?.brand_voice ?? null),
     },

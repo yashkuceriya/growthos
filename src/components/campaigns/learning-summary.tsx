@@ -56,7 +56,7 @@ interface LearningSummary {
     testNext: string[]
   }
   reusableStyleNotes: string[]
-  inputCounts: { metrics: number; ads: number; social: number; email: number }
+  inputCounts: { metrics: number; ads: number; social: number; email: number; manualTasks?: number }
 }
 
 interface ResponseShape {
@@ -141,6 +141,12 @@ export function LearningSummaryPanel({ campaignId }: Props) {
             <span>{summary.inputCounts.social} social post{summary.inputCounts.social === 1 ? '' : 's'}</span>
             <span>·</span>
             <span>{summary.inputCounts.email} email template{summary.inputCounts.email === 1 ? '' : 's'}</span>
+            {(summary.inputCounts.manualTasks ?? 0) > 0 && (
+              <>
+                <span>·</span>
+                <span>{summary.inputCounts.manualTasks} manual task{summary.inputCounts.manualTasks === 1 ? '' : 's'}</span>
+              </>
+            )}
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">

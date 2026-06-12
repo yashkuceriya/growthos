@@ -12,6 +12,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getMarketingMemory } from '@/lib/marketing/memory'
 import { nextBestAction, type NextActionSnapshot } from '@/lib/marketing/next-action'
 import { checkBudget } from '@/lib/budget-guard'
+import { manualWorklogProgress, readManualWorklog } from '@/lib/launch/manual-worklog'
 
 export async function GET(request: Request) {
   const supabase = await createClient()
@@ -93,7 +94,7 @@ export async function GET(request: Request) {
 
   const effectiveCampaignId = focusCampaignId ?? latestCampaignId
   const effectiveCampaignMetadata = focusCampaignId ? focusCampaignMetadata : latestCampaignRow?.metadata ?? null
-  const manualWorklog = readManualWorklog(effectiveCampaignMetadata)
+  const manualWorklog = manualWorklogProgress(readManualWorklog(effectiveCampaignMetadata))
 
   // Per-campaign asset + needs-review snapshot. Skipped when no campaigns.
   let latestCampaignAssetCount = 0
@@ -203,21 +204,4 @@ function socialLimit(platform: string | null): number {
 function bestChannel(performance: Array<{ channel: string; conversions: number; roas: number | null; clicks: number }>): string | null {
   const winner = performance.find((row) => row.conversions > 0 || (row.roas ?? 0) > 0 || row.clicks > 0)
   return winner?.channel ?? null
-}
-
-function readManualWorklog(metadata: Record<string, unknown> | null | undefined): { total: number; done: number; nextTitle: string | null } {
-  const raw = metadata?.manual_launch_tracker
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { total: 0, done: 0, nextTitle: null }
-  const tasks = Array.isArray((raw as Record<string, unknown>).tasks)
-    ? (raw as Record<string, unknown>).tasks as unknown[]
-    : []
-  let done = 0
-  let nextTitle: string | null = null
-  for (const task of tasks) {
-    if (!task || typeof task !== 'object' || Array.isArray(task)) continue
-    const row = task as Record<string, unknown>
-    if (row.done === true) done += 1
-    else if (!nextTitle && typeof row.title === 'string') nextTitle = row.title
-  }
-  return { total: tasks.length, done, nextTitle }
 }
