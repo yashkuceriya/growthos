@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { LearningSummary } from '@/lib/campaigns/learning'
-import { buildCampaignPersonaLearning, campaignPersonaFromMetadata, mergeCampaignPersonaLearning, personaInsightSignal } from './persona-learning'
+import { buildCampaignPersonaLearning, campaignPersonaFromMetadata, mergeCampaignPersonaLearning, personaInsightSignal, personaLearningDigestMap } from './persona-learning'
 
 function summary(overrides: Partial<LearningSummary> = {}): LearningSummary {
   return {
@@ -85,5 +85,38 @@ describe('campaign persona learning', () => {
     expect(personaInsightSignal(summary({
       inputCounts: { metrics: 0, ads: 0, social: 0, email: 0, manualTasks: 1 },
     }))).toBe('1 manual task completed')
+  })
+
+  it('reads compact persona learning digests from brand voice', () => {
+    const digests = personaLearningDigestMap({
+      insights: {
+        persona_current: {
+          'persona-1': {
+            campaign_id: 'camp_1',
+            timestamp: '2026-06-12T02:00:00.000Z',
+            insight_signal: 'Best channel: email',
+            best_channel: 'email',
+            worst_channel: 'twitter',
+            manual_task_count: 3,
+            recommended_next: ['Repeat email', 'Test linkedin'],
+          },
+        },
+        persona_history: {
+          'persona-1': [{}, {}, {}],
+        },
+      },
+    })
+
+    expect(digests['persona-1']).toEqual({
+      personaId: 'persona-1',
+      campaignId: 'camp_1',
+      updatedAt: '2026-06-12T02:00:00.000Z',
+      insightSignal: 'Best channel: email',
+      bestChannel: 'email',
+      worstChannel: 'twitter',
+      manualTaskCount: 3,
+      recommendedNext: ['Repeat email', 'Test linkedin'],
+      historyCount: 3,
+    })
   })
 })

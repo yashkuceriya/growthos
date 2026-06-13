@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Brain, CheckCircle2, Loader2, Plus, RefreshCw, Target, Users } from 'lucide-react'
+import { Brain, CheckCircle2, History, Lightbulb, Loader2, Plus, RefreshCw, Target, TrendingDown, TrendingUp, Users } from 'lucide-react'
 import { PageShell } from '@/components/ui/page-shell'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionPanel } from '@/components/ui/section-panel'
@@ -25,9 +25,22 @@ const EMPTY_FORM = {
   isPrimary: false,
 }
 
+interface PersonaLearningDigest {
+  personaId: string
+  campaignId: string
+  updatedAt: string
+  insightSignal: string | null
+  bestChannel: string | null
+  worstChannel: string | null
+  manualTaskCount: number
+  recommendedNext: string[]
+  historyCount: number
+}
+
 export default function PersonasPage() {
   const { activeProject } = useProject()
   const [personas, setPersonas] = useState<MarketingPersona[]>([])
+  const [personaLearning, setPersonaLearning] = useState<Record<string, PersonaLearningDigest>>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [inferred, setInferred] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -38,6 +51,7 @@ export default function PersonasPage() {
     () => personas.find((persona) => persona.id === selectedId) ?? personas[0] ?? null,
     [personas, selectedId],
   )
+  const selectedLearning = selected ? personaLearning[selected.id] ?? null : null
 
   async function load() {
     if (!activeProject?.id) return
@@ -47,6 +61,7 @@ export default function PersonasPage() {
       const body = await res.json()
       if (!res.ok) throw new Error(body.error ?? 'Could not load personas')
       setPersonas(body.personas ?? [])
+      setPersonaLearning(body.personaLearning ?? {})
       setInferred(Boolean(body.inferred))
       setSelectedId((current) => current ?? body.personas?.[0]?.id ?? null)
     } catch (err) {
@@ -207,6 +222,7 @@ export default function PersonasPage() {
                 <PersonaList title="Objections" items={selected.objections} />
                 <PersonaList title="Desired Outcomes" items={selected.desiredOutcomes} />
                 <PersonaList title="Vocabulary" items={selected.vocabulary} compact />
+                <PersonaLearningBlock learning={selectedLearning} />
               </div>
             ) : (
               <p className="text-sm text-slate-500">No persona selected.</p>
@@ -258,6 +274,48 @@ export default function PersonasPage() {
         </div>
       </div>
     </PageShell>
+  )
+}
+
+function PersonaLearningBlock({ learning }: { learning: PersonaLearningDigest | null }) {
+  return (
+    <div className="border-t border-slate-800 pt-4">
+      <div className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        <Brain className="h-3.5 w-3.5 text-emerald-300" />
+        Campaign Learning
+        {learning && <StatusPill tone="neutral"><History className="h-3 w-3" /> {learning.historyCount} run{learning.historyCount === 1 ? '' : 's'}</StatusPill>}
+      </div>
+      {!learning ? (
+        <p className="text-xs leading-5 text-slate-500">No campaign learning captured for this persona yet.</p>
+      ) : (
+        <div className="space-y-3">
+          {learning.insightSignal && (
+            <div className="flex gap-2 text-sm text-slate-200">
+              <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+              <span>{learning.insightSignal}</span>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {learning.bestChannel && <StatusPill tone="success"><TrendingUp className="h-3 w-3" /> Best {learning.bestChannel}</StatusPill>}
+            {learning.worstChannel && <StatusPill tone="warn"><TrendingDown className="h-3 w-3" /> Rework {learning.worstChannel}</StatusPill>}
+            {learning.manualTaskCount > 0 && <StatusPill tone="info">{learning.manualTaskCount} manual task{learning.manualTaskCount === 1 ? '' : 's'}</StatusPill>}
+          </div>
+          {learning.recommendedNext.length > 0 && (
+            <ul className="space-y-1.5 text-xs leading-5 text-slate-400">
+              {learning.recommendedNext.slice(0, 3).map((item) => (
+                <li key={item} className="flex gap-2">
+                  <span className="font-mono-data text-[10px] text-slate-600">-&gt;</span>
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="text-[10px] text-slate-600">
+            Updated {new Date(learning.updatedAt).toLocaleString()}
+          </p>
+        </div>
+      )}
+    </div>
   )
 }
 

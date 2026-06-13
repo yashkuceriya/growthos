@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { getMarketingMemory } from '@/lib/marketing/memory'
 import { inferPersonasFromMemory, normalizePersonaRow, personaToRow, type MarketingPersona, type PersonaSkepticism } from '@/lib/marketing/personas'
+import { personaLearningDigestMap } from '@/lib/marketing/persona-learning'
 
 export async function GET(request: Request) {
   const supabase = await createClient()
@@ -13,10 +14,11 @@ export async function GET(request: Request) {
 
   const { data: project } = await supabase
     .from('projects')
-    .select('id')
+    .select('id, brand_voice')
     .eq('id', projectId)
-    .maybeSingle()
+    .maybeSingle() as { data: { id: string; brand_voice: Record<string, unknown> | null } | null }
   if (!project) return Response.json({ error: 'Project not found' }, { status: 404 })
+  const personaLearning = personaLearningDigestMap(project.brand_voice)
 
   const { data, error } = await supabase
     .from('personas')
@@ -26,11 +28,15 @@ export async function GET(request: Request) {
     .order('created_at', { ascending: true })
 
   if (!error && data && data.length > 0) {
-    return Response.json({ personas: data.map((row) => normalizePersonaRow(row as Record<string, unknown>)), inferred: false })
+    return Response.json({
+      personas: data.map((row) => normalizePersonaRow(row as Record<string, unknown>)),
+      personaLearning,
+      inferred: false,
+    })
   }
 
   const memory = await getMarketingMemory({ supabase, userId: user.id, projectId })
-  return Response.json({ personas: inferPersonasFromMemory(memory), inferred: true })
+  return Response.json({ personas: inferPersonasFromMemory(memory), personaLearning, inferred: true })
 }
 
 export async function POST(request: Request) {

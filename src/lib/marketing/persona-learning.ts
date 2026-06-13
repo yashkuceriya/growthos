@@ -17,6 +17,18 @@ export interface CampaignPersonaLearning {
   summary: LearningSummary
 }
 
+export interface PersonaLearningDigest {
+  personaId: string
+  campaignId: string
+  updatedAt: string
+  insightSignal: string | null
+  bestChannel: string | null
+  worstChannel: string | null
+  manualTaskCount: number
+  recommendedNext: string[]
+  historyCount: number
+}
+
 export function campaignPersonaFromMetadata(metadata: Record<string, unknown> | null | undefined): CampaignPersonaLearning['persona'] | null {
   const direct = readPersona(metadata?.persona)
   if (direct) return direct
@@ -71,12 +83,46 @@ export function mergeCampaignPersonaLearning(
   }
 }
 
+export function personaLearningDigestMap(brandVoice: Record<string, unknown> | null | undefined): Record<string, PersonaLearningDigest> {
+  const insights = readObjectMap(brandVoice?.insights)
+  const current = readObjectMap(insights.persona_current)
+  const history = readHistoryMap(insights.persona_history)
+  const out: Record<string, PersonaLearningDigest> = {}
+  for (const [personaId, raw] of Object.entries(current)) {
+    const digest = readLearningDigest(personaId, raw, history[personaId]?.length ?? 0)
+    if (digest) out[personaId] = digest
+  }
+  return out
+}
+
 export function personaInsightSignal(summary: LearningSummary): string | null {
   if (summary.strongestHook) return summary.strongestHook
   if (summary.bestChannel) return `Best channel: ${summary.bestChannel.channel}`
   if (summary.recommendedNext.length > 0) return summary.recommendedNext[0]
   if (summary.inputCounts.manualTasks > 0) return `${summary.inputCounts.manualTasks} manual task${summary.inputCounts.manualTasks === 1 ? '' : 's'} completed`
   return null
+}
+
+function readLearningDigest(personaId: string, raw: unknown, historyCount: number): PersonaLearningDigest | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const row = raw as Record<string, unknown>
+  const campaignId = typeof row.campaign_id === 'string' ? row.campaign_id : null
+  const updatedAt = typeof row.timestamp === 'string' ? row.timestamp : null
+  if (!campaignId || !updatedAt) return null
+  const recommended = Array.isArray(row.recommended_next)
+    ? row.recommended_next.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).slice(0, 5)
+    : []
+  return {
+    personaId,
+    campaignId,
+    updatedAt,
+    insightSignal: typeof row.insight_signal === 'string' ? row.insight_signal : null,
+    bestChannel: typeof row.best_channel === 'string' ? row.best_channel : null,
+    worstChannel: typeof row.worst_channel === 'string' ? row.worst_channel : null,
+    manualTaskCount: typeof row.manual_task_count === 'number' ? row.manual_task_count : 0,
+    recommendedNext: recommended,
+    historyCount,
+  }
 }
 
 function readPersona(raw: unknown): CampaignPersonaLearning['persona'] | null {
