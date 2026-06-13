@@ -13,6 +13,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { summarizeCampaign, type LearningSummaryInputs } from '@/lib/campaigns/learning'
 import { completedManualWorklogTasks, readManualWorklog } from '@/lib/launch/manual-worklog'
+import { mergeBrandVoice } from '@/lib/brand-voice'
+import { buildCampaignPersonaLearning, mergeCampaignPersonaLearning } from '@/lib/marketing/persona-learning'
 
 export async function GET(_request: Request, ctx: { params: Promise<{ id: string }> }) {
   const supabase = await createClient()
@@ -100,11 +102,12 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
   }
 
   const summary = summarizeCampaign(inputs)
+  const projectBrandVoice = (projectRes as { data?: { brand_voice?: Record<string, unknown> | null } | null }).data?.brand_voice ?? null
 
   // Persist back onto the campaign metadata so the next page-load is
   // instant and the next launch can read it without recomputing. Fire-and-
   // forget — failure here doesn't break the response.
-  void persistSummary(supabase, campaignId, campaign.metadata, summary)
+  void persistSummaryAndPersonaLearning(supabase, campaign, projectBrandVoice, summary)
 
   return Response.json({ summary, inputs: { counts: summary.inputCounts } })
 }
@@ -158,17 +161,41 @@ function readCurrentInsights(brandVoice: Record<string, unknown> | null): Record
   return current as Record<string, unknown>
 }
 
-async function persistSummary(
+async function persistSummaryAndPersonaLearning(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: any,
-  campaignId: string,
-  existing: Record<string, unknown> | null,
+  campaign: { id: string; project_id: string; metadata: Record<string, unknown> | null },
+  projectBrandVoice: Record<string, unknown> | null,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   summary: any,
 ): Promise<void> {
   try {
-    const nextMetadata = { ...(existing ?? {}), learning_summary: summary }
-    await supabase.from('campaigns').update({ metadata: nextMetadata }).eq('id', campaignId)
+    const personaLearning = buildCampaignPersonaLearning({
+      campaignId: campaign.id,
+      metadata: campaign.metadata,
+      summary,
+    })
+    const nextMetadata = {
+      ...(campaign.metadata ?? {}),
+      learning_summary: summary,
+      ...(personaLearning ? {
+        persona_learning: {
+          persona_id: personaLearning.persona.id,
+          persona_name: personaLearning.persona.name,
+          insight_signal: personaLearning.insight_signal,
+          insights: summary,
+        },
+      } : {}),
+    }
+    await supabase.from('campaigns').update({ metadata: nextMetadata }).eq('id', campaign.id)
+    if (personaLearning) {
+      const insights = projectBrandVoice?.insights && typeof projectBrandVoice.insights === 'object' && !Array.isArray(projectBrandVoice.insights)
+        ? projectBrandVoice.insights as Record<string, unknown>
+        : {}
+      await mergeBrandVoice(supabase, campaign.project_id, {
+        insights: mergeCampaignPersonaLearning(insights, personaLearning),
+      })
+    }
   } catch {
     // Best-effort. Persistence failure should not block the read.
   }

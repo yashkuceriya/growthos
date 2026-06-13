@@ -488,7 +488,7 @@ function PersonaLearningCard({ persona, learning }: { persona: CampaignPersonaMe
 }
 
 function readCampaignPersona(meta: Record<string, unknown>): CampaignPersonaMeta | null {
-  const raw = meta.persona
+  const raw = meta.persona ?? readManualTrackerPersona(meta)
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const record = raw as Record<string, unknown>
   const name = typeof record.name === 'string' ? record.name : null
@@ -513,12 +513,21 @@ function readPersonaLearning(meta: Record<string, unknown>): PersonaLearningMeta
   const signal = firstString(insights?.winning_hooks)
     ?? firstString(insights?.themes_that_resonate)
     ?? firstString(insights?.next_experiments)
+    ?? (typeof record.insight_signal === 'string' ? record.insight_signal : null)
+    ?? (typeof insights?.strongestHook === 'string' ? insights.strongestHook : null)
+    ?? firstString(insights?.recommendedNext)
     ?? null
   return {
     personaId: typeof record.persona_id === 'string' ? record.persona_id : null,
     personaName: typeof record.persona_name === 'string' ? record.persona_name : null,
     insightSignal: signal,
   }
+}
+
+function readManualTrackerPersona(meta: Record<string, unknown>): unknown {
+  const raw = meta.manual_launch_tracker
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  return (raw as Record<string, unknown>).persona
 }
 
 function firstString(value: unknown): string | null {

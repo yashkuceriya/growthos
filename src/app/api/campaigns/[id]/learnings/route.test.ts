@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+const mocks = vi.hoisted(() => ({
+  mergeBrandVoice: vi.fn(async () => ({})),
+}))
+
 interface TableResponse { data: unknown; error: unknown }
 
 interface State {
@@ -73,6 +77,10 @@ vi.mock('@/lib/supabase/server', () => ({
   }),
 }))
 
+vi.mock('@/lib/brand-voice', () => ({
+  mergeBrandVoice: mocks.mergeBrandVoice,
+}))
+
 import { GET } from './route'
 
 function ctx(id: string) {
@@ -83,6 +91,7 @@ beforeEach(() => {
   state.user = { id: 'user_1' }
   state.campaignRow = { id: 'camp_1', project_id: 'proj_1', metadata: {} }
   state.updateCalls = []
+  mocks.mergeBrandVoice.mockClear()
   state.table = {
     projects: { data: { brand_voice: { insights: { current: { winning_hooks: ['Founder-built'] } } } }, error: null },
     campaign_metrics: { data: [
@@ -127,6 +136,7 @@ describe('GET /api/campaigns/[id]/learnings', () => {
       id: 'camp_1',
       project_id: 'proj_1',
       metadata: {
+        persona: { id: 'persona-founder', name: 'Founder Operator', role: 'Founder', skepticismLevel: 'high' },
         manual_launch_tracker: {
           tasks: [
             { id: 'email', title: 'Ship email asset', detail: 'Send the sequence', metric: 'Replies', channel: 'email', done: true },
@@ -145,5 +155,25 @@ describe('GET /api/campaigns/[id]/learnings', () => {
     expect(body.summary.recommendedNext.join(' | ')).toMatch(/log manual results/i)
     const persisted = state.updateCalls[0].metadata.learning_summary as { inputCounts: { manualTasks: number } }
     expect(persisted.inputCounts.manualTasks).toBe(1)
+    const personaLearning = state.updateCalls[0].metadata.persona_learning as { persona_id: string; insight_signal: string | null }
+    expect(personaLearning.persona_id).toBe('persona-founder')
+    expect(personaLearning.insight_signal).toBeTruthy()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(mocks.mergeBrandVoice).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj_1',
+      expect.objectContaining({
+        insights: expect.objectContaining({
+          last_persona_learning_campaign_id: 'camp_1',
+          persona_current: expect.objectContaining({
+            'persona-founder': expect.objectContaining({
+              manual_task_count: 1,
+              persona: expect.objectContaining({ name: 'Founder Operator' }),
+            }),
+          }),
+        }),
+      }),
+    )
   })
 })
