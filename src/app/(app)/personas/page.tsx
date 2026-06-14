@@ -27,6 +27,7 @@ const EMPTY_FORM = {
 
 interface PersonaLearningDigest {
   personaId: string
+  personaName: string | null
   campaignId: string
   updatedAt: string
   insightSignal: string | null

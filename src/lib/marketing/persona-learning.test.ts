@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { LearningSummary } from '@/lib/campaigns/learning'
-import { buildCampaignPersonaLearning, campaignPersonaFromMetadata, mergeCampaignPersonaLearning, personaInsightSignal, personaLearningDigestMap } from './persona-learning'
+import { buildCampaignPersonaLearning, campaignPersonaFromMetadata, latestPersonaLearningDigest, mergeCampaignPersonaLearning, personaInsightSignal, personaLearningDigestMap } from './persona-learning'
 
 function summary(overrides: Partial<LearningSummary> = {}): LearningSummary {
   return {
@@ -94,6 +94,7 @@ describe('campaign persona learning', () => {
           'persona-1': {
             campaign_id: 'camp_1',
             timestamp: '2026-06-12T02:00:00.000Z',
+            persona: { id: 'persona-1', name: 'Founder Operator' },
             insight_signal: 'Best channel: email',
             best_channel: 'email',
             worst_channel: 'twitter',
@@ -109,6 +110,7 @@ describe('campaign persona learning', () => {
 
     expect(digests['persona-1']).toEqual({
       personaId: 'persona-1',
+      personaName: 'Founder Operator',
       campaignId: 'camp_1',
       updatedAt: '2026-06-12T02:00:00.000Z',
       insightSignal: 'Best channel: email',
@@ -118,5 +120,27 @@ describe('campaign persona learning', () => {
       recommendedNext: ['Repeat email', 'Test linkedin'],
       historyCount: 3,
     })
+  })
+
+  it('selects the latest persona learning digest', () => {
+    const digest = latestPersonaLearningDigest({
+      insights: {
+        persona_current: {
+          early: {
+            campaign_id: 'camp_1',
+            timestamp: '2026-06-12T02:00:00.000Z',
+            persona: { name: 'Early' },
+          },
+          latest: {
+            campaign_id: 'camp_2',
+            timestamp: '2026-06-13T02:00:00.000Z',
+            persona: { name: 'Latest' },
+          },
+        },
+      },
+    })
+
+    expect(digest?.personaId).toBe('latest')
+    expect(digest?.personaName).toBe('Latest')
   })
 })

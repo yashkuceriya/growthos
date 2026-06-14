@@ -13,6 +13,7 @@ import { getMarketingMemory } from '@/lib/marketing/memory'
 import { nextBestAction, type NextActionSnapshot } from '@/lib/marketing/next-action'
 import { checkBudget } from '@/lib/budget-guard'
 import { manualWorklogProgress, readManualWorklog } from '@/lib/launch/manual-worklog'
+import { latestPersonaLearningDigest } from '@/lib/marketing/persona-learning'
 
 export async function GET(request: Request) {
   const supabase = await createClient()
@@ -35,9 +36,9 @@ export async function GET(request: Request) {
   // dashboard renders something instead of 404ing.
   const { data: project } = await supabase
     .from('projects')
-    .select('id, website')
+    .select('id, website, brand_voice')
     .eq('id', projectId)
-    .maybeSingle() as { data: { id: string; website: string | null } | null }
+    .maybeSingle() as { data: { id: string; website: string | null; brand_voice: Record<string, unknown> | null } | null }
   if (!project) {
     return Response.json({
       action: nextBestAction({ hasProject: false }),
@@ -95,6 +96,7 @@ export async function GET(request: Request) {
   const effectiveCampaignId = focusCampaignId ?? latestCampaignId
   const effectiveCampaignMetadata = focusCampaignId ? focusCampaignMetadata : latestCampaignRow?.metadata ?? null
   const manualWorklog = manualWorklogProgress(readManualWorklog(effectiveCampaignMetadata))
+  const personaLearning = latestPersonaLearningDigest(project.brand_voice)
 
   // Per-campaign asset + needs-review snapshot. Skipped when no campaigns.
   let latestCampaignAssetCount = 0
@@ -186,6 +188,11 @@ export async function GET(request: Request) {
     bestChannel: bestChannel(memory.performance ?? []),
     hasInsights: memory.launchInsights.current !== null,
     hasWinners,
+    personaLearningPersonaId: personaLearning?.personaId ?? null,
+    personaLearningPersonaName: personaLearning?.personaName ?? null,
+    personaLearningBestChannel: personaLearning?.bestChannel ?? null,
+    personaLearningInsightSignal: personaLearning?.insightSignal ?? null,
+    personaLearningRecommendedNext: personaLearning?.recommendedNext[0] ?? null,
     budgetExceeded: !budget.ok && !('unavailable' in budget && budget.unavailable),
   }
 

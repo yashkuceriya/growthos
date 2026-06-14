@@ -49,6 +49,11 @@ export interface NextActionSnapshot {
   // Learning
   hasInsights: boolean
   hasWinners: boolean
+  personaLearningPersonaId: string | null
+  personaLearningPersonaName: string | null
+  personaLearningBestChannel: string | null
+  personaLearningInsightSignal: string | null
+  personaLearningRecommendedNext: string | null
 
   // Budget / cost
   budgetExceeded: boolean
@@ -76,6 +81,11 @@ const EMPTY_SNAPSHOT: NextActionSnapshot = {
   bestChannel: null,
   hasInsights: false,
   hasWinners: false,
+  personaLearningPersonaId: null,
+  personaLearningPersonaName: null,
+  personaLearningBestChannel: null,
+  personaLearningInsightSignal: null,
+  personaLearningRecommendedNext: null,
   budgetExceeded: false,
 }
 
@@ -238,6 +248,23 @@ export function nextBestAction(input: Partial<NextActionSnapshot>): NextBestActi
   }
 
   // Everything's healthy → suggest the next experiment.
+  if (s.personaLearningPersonaId && (s.personaLearningBestChannel || s.personaLearningInsightSignal || s.personaLearningRecommendedNext)) {
+    const persona = s.personaLearningPersonaName ?? 'the learned persona'
+    const channel = s.personaLearningBestChannel ? humanize(s.personaLearningBestChannel) : null
+    return {
+      id: 'persona_followup',
+      priority: 'low',
+      title: channel ? `Plan ${channel} follow-up for ${persona}` : `Plan follow-up for ${persona}`,
+      reason: [
+        s.personaLearningInsightSignal ? `Latest persona signal: ${s.personaLearningInsightSignal}.` : null,
+        s.personaLearningRecommendedNext ? `Next test: ${s.personaLearningRecommendedNext}.` : null,
+        channel ? `Use ${channel} as the starting channel because this buyer has evidence there.` : null,
+      ].filter(Boolean).join(' '),
+      ctaLabel: 'Plan persona launch',
+      href: `/launch?personaId=${encodeURIComponent(s.personaLearningPersonaId)}`,
+    }
+  }
+
   if (s.bestChannel) {
     return {
       id: 'double_down',

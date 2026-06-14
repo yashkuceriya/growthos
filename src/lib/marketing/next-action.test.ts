@@ -147,6 +147,37 @@ describe('nextBestAction', () => {
     expect(action.title).toContain('Linkedin')
   })
 
+  it('uses persona learning before generic channel double-down when everything is healthy', () => {
+    const action = nextBestAction({
+      hasProject: true, projectWebsite: 'https://x.com', blueprint: READY_BLUEPRINT,
+      campaignCount: 2, latestCampaignAssetCount: 8,
+      hasMeasurements: true, hasInsights: true, hasWinners: true,
+      bestChannel: 'linkedin',
+      personaLearningPersonaId: 'persona-founder',
+      personaLearningPersonaName: 'Founder Operator',
+      personaLearningBestChannel: 'email',
+      personaLearningInsightSignal: 'Founder Operator replied to direct launch emails.',
+      personaLearningRecommendedNext: 'Repeat the email angle with a tighter proof point.',
+    })
+    expect(action.id).toBe('persona_followup')
+    expect(action.title).toContain('Founder Operator')
+    expect(action.title).toContain('Email')
+    expect(action.reason).toContain('direct launch emails')
+    expect(action.href).toBe('/launch?personaId=persona-founder')
+  })
+
+  it('does not let persona learning skip urgent review work', () => {
+    const action = nextBestAction({
+      hasProject: true, projectWebsite: 'https://x.com', blueprint: READY_BLUEPRINT,
+      campaignCount: 1, latestCampaignAssetCount: 6,
+      adsNeedingReview: 2,
+      personaLearningPersonaId: 'persona-founder',
+      personaLearningPersonaName: 'Founder Operator',
+      personaLearningBestChannel: 'email',
+    })
+    expect(action.id).toBe('review_ads')
+  })
+
   it('falls through to a next-experiment nudge when everything is healthy', () => {
     const action = nextBestAction({
       hasProject: true, projectWebsite: 'https://x.com', blueprint: READY_BLUEPRINT,

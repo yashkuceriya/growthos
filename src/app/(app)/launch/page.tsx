@@ -142,6 +142,7 @@ export default function LaunchPage() {
   // routes here with ?campaignId=... so new assets reuse the existing
   // campaign id instead of orphaning under a new row.
   const reuseCampaignId = searchParams.get('campaignId')
+  const requestedPersonaId = searchParams.get('personaId')
   const supabase = createClient()
 
   const [launching, setLaunching] = useState(false)
@@ -283,6 +284,7 @@ export default function LaunchPage() {
       const nextPersonas = (body.personas ?? []) as MarketingPersona[]
       setPersonas(nextPersonas)
       setSelectedPersonaId((current) => {
+        if (requestedPersonaId && nextPersonas.some((persona) => persona.id === requestedPersonaId)) return requestedPersonaId
         if (current && nextPersonas.some((persona) => persona.id === current)) return current
         return nextPersonas.find((persona) => persona.isPrimary)?.id ?? nextPersonas[0]?.id ?? ''
       })
@@ -297,7 +299,7 @@ export default function LaunchPage() {
   useEffect(() => {
     if (activeProject) void loadPersonas(activeProject.id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProject?.id])
+  }, [activeProject?.id, requestedPersonaId])
 
   async function loadPriorLearning(campaignId: string) {
     setPriorLearningLoading(true)

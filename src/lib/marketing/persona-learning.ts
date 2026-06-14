@@ -19,6 +19,7 @@ export interface CampaignPersonaLearning {
 
 export interface PersonaLearningDigest {
   personaId: string
+  personaName: string | null
   campaignId: string
   updatedAt: string
   insightSignal: string | null
@@ -95,6 +96,12 @@ export function personaLearningDigestMap(brandVoice: Record<string, unknown> | n
   return out
 }
 
+export function latestPersonaLearningDigest(brandVoice: Record<string, unknown> | null | undefined): PersonaLearningDigest | null {
+  const digests = Object.values(personaLearningDigestMap(brandVoice))
+  if (digests.length === 0) return null
+  return digests.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0]
+}
+
 export function personaInsightSignal(summary: LearningSummary): string | null {
   if (summary.strongestHook) return summary.strongestHook
   if (summary.bestChannel) return `Best channel: ${summary.bestChannel.channel}`
@@ -114,6 +121,7 @@ function readLearningDigest(personaId: string, raw: unknown, historyCount: numbe
     : []
   return {
     personaId,
+    personaName: readDigestPersonaName(row.persona),
     campaignId,
     updatedAt,
     insightSignal: typeof row.insight_signal === 'string' ? row.insight_signal : null,
@@ -123,6 +131,12 @@ function readLearningDigest(personaId: string, raw: unknown, historyCount: numbe
     recommendedNext: recommended,
     historyCount,
   }
+}
+
+function readDigestPersonaName(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const name = (raw as Record<string, unknown>).name
+  return typeof name === 'string' ? name : null
 }
 
 function readPersona(raw: unknown): CampaignPersonaLearning['persona'] | null {

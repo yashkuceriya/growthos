@@ -43,7 +43,7 @@ vi.mock('@/lib/budget-guard', () => ({
 
 interface State {
   user: { id: string } | null
-  projectRow: { id: string; website: string | null } | null
+  projectRow: { id: string; website: string | null; brand_voice?: Record<string, unknown> | null } | null
   latestCampaign: { id: string; metadata?: Record<string, unknown> | null } | null
   campaignCount: number | null
   fanout: Record<string, { count?: number | null; data?: unknown[] }>
@@ -123,7 +123,7 @@ import { GET } from './route'
 
 beforeEach(() => {
   state.user = { id: 'u1' }
-  state.projectRow = { id: 'proj_1', website: 'https://example.com' }
+  state.projectRow = { id: 'proj_1', website: 'https://example.com', brand_voice: null }
   state.latestCampaign = { id: 'camp_latest', metadata: null }
   state.campaignCount = 2
   state.fanout = {
@@ -154,6 +154,35 @@ describe('GET /api/next-action', () => {
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.action.id).toBe('review_ads')
+  })
+
+  it('includes latest persona learning in the snapshot', async () => {
+    state.projectRow = {
+      id: 'proj_1',
+      website: 'https://example.com',
+      brand_voice: {
+        insights: {
+          persona_current: {
+            'persona-founder': {
+              campaign_id: 'camp_1',
+              timestamp: '2026-06-13T01:00:00.000Z',
+              persona: { id: 'persona-founder', name: 'Founder Operator' },
+              insight_signal: 'Best channel: email',
+              best_channel: 'email',
+              recommended_next: ['Repeat the proof-led email angle'],
+            },
+          },
+        },
+      },
+    }
+
+    const res = await GET(new Request('https://app.test/api/next-action?projectId=proj_1'))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.snapshot.personaLearningPersonaId).toBe('persona-founder')
+    expect(body.snapshot.personaLearningPersonaName).toBe('Founder Operator')
+    expect(body.snapshot.personaLearningBestChannel).toBe('email')
+    expect(body.snapshot.personaLearningRecommendedNext).toBe('Repeat the proof-led email angle')
   })
 
   it('returns manual worklog task when latest campaign has unfinished manual tasks and no generated assets', async () => {
