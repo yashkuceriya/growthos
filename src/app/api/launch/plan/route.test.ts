@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 interface State {
   user: { id: string } | null
-  ownedProject: { id: string } | null
+  ownedProject: { id: string; brand_voice?: Record<string, unknown> | null } | null
   memory: unknown
 }
 
@@ -60,7 +60,7 @@ function makeMemory() {
 
 beforeEach(() => {
   state.user = { id: 'user_1' }
-  state.ownedProject = { id: 'p1' }
+  state.ownedProject = { id: 'p1', brand_voice: null }
   state.memory = makeMemory()
   getMarketingMemoryMock.mockResolvedValue(state.memory)
   getPersonaByIdMock.mockResolvedValue(null)
@@ -95,7 +95,7 @@ describe('GET /api/launch/plan', () => {
     const body = await res.json()
     expect(body.plan).toMatchObject({ vertical: 'b2b_saas', defaultChannels: ['linkedin', 'email'] })
     expect(getMarketingMemoryMock).toHaveBeenCalled()
-    expect(buildLaunchPlanMock).toHaveBeenCalledWith({ memory: state.memory, persona: null })
+    expect(buildLaunchPlanMock).toHaveBeenCalledWith({ memory: state.memory, persona: null, personaLearning: null })
   })
 
   it('passes personaId into the planner when provided', async () => {
@@ -107,6 +107,42 @@ describe('GET /api/launch/plan', () => {
     const body = await res.json()
     expect(body.persona).toStrictEqual(persona)
     expect(getPersonaByIdMock).toHaveBeenCalledWith(expect.anything(), 'p1', 'persona-1', state.memory)
-    expect(buildLaunchPlanMock).toHaveBeenCalledWith({ memory: state.memory, persona })
+    expect(buildLaunchPlanMock).toHaveBeenCalledWith({ memory: state.memory, persona, personaLearning: null })
+  })
+
+  it('passes selected persona learning into the planner', async () => {
+    const persona = { id: 'persona-1', name: 'Growth Marketer' }
+    getPersonaByIdMock.mockResolvedValue(persona)
+    state.ownedProject = {
+      id: 'p1',
+      brand_voice: {
+        insights: {
+          persona_current: {
+            'persona-1': {
+              campaign_id: 'camp_1',
+              timestamp: '2026-06-14T01:00:00.000Z',
+              persona: { id: 'persona-1', name: 'Growth Marketer' },
+              insight_signal: 'Best channel: email',
+              best_channel: 'email',
+              recommended_next: ['Repeat the email angle'],
+            },
+          },
+        },
+      },
+    }
+    const req = new Request('https://app.test/api/launch/plan?projectId=p1&personaId=persona-1')
+    const res = await GET(req)
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.personaLearning).toEqual(expect.objectContaining({
+      personaId: 'persona-1',
+      bestChannel: 'email',
+      recommendedNext: ['Repeat the email angle'],
+    }))
+    expect(buildLaunchPlanMock).toHaveBeenCalledWith({
+      memory: state.memory,
+      persona,
+      personaLearning: expect.objectContaining({ bestChannel: 'email' }),
+    })
   })
 })

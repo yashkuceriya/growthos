@@ -10,6 +10,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getMarketingMemory } from '@/lib/marketing/memory'
 import { buildLaunchPlan } from '@/lib/launch/plan'
 import { getPersonaById } from '@/lib/marketing/personas'
+import { personaLearningDigestMap } from '@/lib/marketing/persona-learning'
 
 export async function GET(request: Request) {
   const supabase = await createClient()
@@ -26,9 +27,9 @@ export async function GET(request: Request) {
   // doesn't belong to the user.
   const { data: project } = await supabase
     .from('projects')
-    .select('id')
+    .select('id, brand_voice')
     .eq('id', projectId)
-    .maybeSingle() as { data: { id: string } | null }
+    .maybeSingle() as { data: { id: string; brand_voice: Record<string, unknown> | null } | null }
   if (!project) return Response.json({ error: 'Project not found' }, { status: 404 })
 
   const memory = await getMarketingMemory({
@@ -38,7 +39,8 @@ export async function GET(request: Request) {
   })
 
   const persona = await getPersonaById(supabase, projectId, personaId, memory)
-  const plan = buildLaunchPlan({ memory, persona })
+  const personaLearning = persona ? personaLearningDigestMap(project.brand_voice)[persona.id] ?? null : null
+  const plan = buildLaunchPlan({ memory, persona, personaLearning })
 
-  return Response.json({ plan, persona })
+  return Response.json({ plan, persona, personaLearning })
 }

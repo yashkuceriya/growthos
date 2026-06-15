@@ -6,6 +6,7 @@
 import { getPlaybook, type Channel as PlaybookChannel } from '@/lib/ai/playbooks/registry'
 import type { MarketingMemory } from '@/lib/marketing/memory'
 import type { MarketingPersona } from '@/lib/marketing/personas'
+import type { PersonaLearningDigest } from '@/lib/marketing/persona-learning'
 
 // The 8 channels the orchestrator actually implements today. The playbook
 // registry knows about many more (google_search, product_hunt, etc.) but
@@ -88,6 +89,7 @@ export interface LaunchPlan {
 export interface BuildLaunchPlanArgs {
   memory: MarketingMemory
   persona?: MarketingPersona | null
+  personaLearning?: PersonaLearningDigest | null
 }
 
 export interface LaunchExecutionLearning {
@@ -119,7 +121,7 @@ export interface BuildLaunchExecutionChecklistArgs {
   angle?: string | null
 }
 
-export function buildLaunchPlan({ memory, persona }: BuildLaunchPlanArgs): LaunchPlan {
+export function buildLaunchPlan({ memory, persona, personaLearning }: BuildLaunchPlanArgs): LaunchPlan {
   const vertical = memory.blueprint.vertical
   const playbook = getPlaybook(vertical)
 
@@ -131,13 +133,14 @@ export function buildLaunchPlan({ memory, persona }: BuildLaunchPlanArgs): Launc
     const pbCh = ch as PlaybookChannel
     const playbookTier = primarySet.has(pbCh) ? 'primary' : secondarySet.has(pbCh) ? 'secondary' : 'off'
     const fit = personaFit?.get(ch) ?? null
-    const tier = adjustedTier(playbookTier, fit)
+    const learningFit = personaLearningChannelFit(ch, personaLearning)
+    const tier = adjustedTier(playbookTier, fit, learningFit)
 
     if (tier === 'primary') {
       return {
         channel: ch,
         tier: 'primary',
-        reason: channelReason(ch, 'primary', vertical, fit),
+        reason: channelReason(ch, 'primary', vertical, fit, learningFit),
         defaultOn: true,
       }
     }
@@ -145,27 +148,27 @@ export function buildLaunchPlan({ memory, persona }: BuildLaunchPlanArgs): Launc
       return {
         channel: ch,
         tier: 'secondary',
-        reason: channelReason(ch, 'secondary', vertical, fit),
+        reason: channelReason(ch, 'secondary', vertical, fit, learningFit),
         defaultOn: true,
       }
     }
     return {
       channel: ch,
       tier: 'off',
-      reason: channelReason(ch, 'off', vertical, fit),
+      reason: channelReason(ch, 'off', vertical, fit, learningFit),
       defaultOn: false,
     }
   })
 
   const defaultChannels = channels.filter((c) => c.defaultOn).map((c) => c.channel)
 
-  const suggestedAngles = angleSuggestions(memory)
+  const suggestedAngles = angleSuggestions(memory, personaLearning)
   const goalPlan = personaGoalPlan(memory, persona)
   const defaultGoal = goalPlan.goal
   const defaultAngle = suggestedAngles[0] ?? null
   const answerEngine = answerEnginePlan(memory, persona, defaultChannels)
-  const experiments = experimentDesign(memory, persona, channels, defaultGoal)
-  const strategy = strategyBrief(memory, persona, channels, defaultGoal, goalPlan.rationale, answerEngine)
+  const experiments = experimentDesign(memory, persona, channels, defaultGoal, personaLearning)
+  const strategy = strategyBrief(memory, persona, channels, defaultGoal, goalPlan.rationale, answerEngine, personaLearning)
 
   return {
     vertical,
@@ -328,14 +331,29 @@ export function buildLaunchExecutionChecklist({
 // by past launches (insights.current.winning_hooks). Falls back to value-prop
 // derivatives so a brand-new project still gets options instead of an empty
 // state.
-function angleSuggestions(memory: MarketingMemory): string[] {
+function angleSuggestions(memory: MarketingMemory, personaLearning: PersonaLearningDigest | null | undefined): string[] {
   const current = memory.launchInsights.current
+  const fromPersonaLearning = personaLearningAngles(personaLearning)
   const fromInsights = currentInsightAngles(current)
-  if (fromInsights.length >= 3) return fromInsights.slice(0, 4)
+  if ([...fromPersonaLearning, ...fromInsights].length >= 3) return unique([...fromPersonaLearning, ...fromInsights]).slice(0, 4)
 
   const fromBlueprint = blueprintAngles(memory)
-  const merged = unique([...fromInsights, ...fromBlueprint])
+  const merged = unique([...fromPersonaLearning, ...fromInsights, ...fromBlueprint])
   return merged.slice(0, 4)
+}
+
+function personaLearningAngles(personaLearning: PersonaLearningDigest | null | undefined): string[] {
+  if (!personaLearning) return []
+  const persona = personaLearning.personaName ?? 'this persona'
+  const bestChannel = personaLearning.bestChannel ? normalizeChannelAlias(personaLearning.bestChannel) : null
+  const learned = [
+    ...personaLearning.recommendedNext,
+    personaLearning.insightSignal && !/^best channel:/i.test(personaLearning.insightSignal)
+      ? personaLearning.insightSignal
+      : null,
+    bestChannel ? `Follow up on ${channelLabel(bestChannel)} for ${persona}` : null,
+  ]
+  return learned.filter((item): item is string => typeof item === 'string' && item.trim().length > 6).map((item) => item.trim())
 }
 
 function currentInsightAngles(current: unknown): string[] {
@@ -362,12 +380,31 @@ function blueprintAngles(memory: MarketingMemory): string[] {
 }
 
 type PersonaFit = 'preferred' | 'adjacent' | 'mismatch'
+type PersonaLearningChannelFit = 'best' | 'worst'
 
-function adjustedTier(tier: 'primary' | 'secondary' | 'off', fit: PersonaFit | null): 'primary' | 'secondary' | 'off' {
+function adjustedTier(tier: 'primary' | 'secondary' | 'off', fit: PersonaFit | null, learningFit: PersonaLearningChannelFit | null = null): 'primary' | 'secondary' | 'off' {
+  if (learningFit === 'best') return 'primary'
+  if (learningFit === 'worst') return tier === 'primary' ? 'secondary' : 'off'
   if (fit === 'preferred') return tier === 'off' ? 'secondary' : 'primary'
   if (fit === 'adjacent') return tier === 'off' ? 'secondary' : tier
   if (fit === 'mismatch') return tier === 'primary' ? 'secondary' : 'off'
   return tier
+}
+
+function personaLearningChannelFit(channel: LaunchChannel, personaLearning: PersonaLearningDigest | null | undefined): PersonaLearningChannelFit | null {
+  if (!personaLearning) return null
+  if (personaLearning.bestChannel && normalizeChannelAlias(personaLearning.bestChannel) === channel) return 'best'
+  if (personaLearning.worstChannel && normalizeChannelAlias(personaLearning.worstChannel) === channel) return 'worst'
+  return null
+}
+
+function normalizeChannelAlias(channel: string): LaunchChannel | null {
+  const normalized = channel.toLowerCase().replace(/[_\s]+/g, '-')
+  if (normalized === 'x') return 'twitter'
+  if (normalized === 'email-lifecycle') return 'email'
+  if (normalized === 'seo' || normalized === 'content') return 'blog'
+  if (normalized === 'facebook' || normalized === 'instagram') return 'meta'
+  return isLaunchChannel(normalized) ? normalized : null
 }
 
 function personaChannelFit(persona: MarketingPersona): Map<LaunchChannel, PersonaFit> {
@@ -401,8 +438,11 @@ function personaChannelFit(persona: MarketingPersona): Map<LaunchChannel, Person
   return fits
 }
 
-function channelReason(channel: LaunchChannel, tier: 'primary' | 'secondary' | 'off', vertical: string, fit: PersonaFit | null): string {
+function channelReason(channel: LaunchChannel, tier: 'primary' | 'secondary' | 'off', vertical: string, fit: PersonaFit | null, learningFit: PersonaLearningChannelFit | null = null): string {
   const verticalLabel = vertical === 'other' ? 'this product type' : vertical.replace(/_/g, ' ')
+  if (learningFit === 'best') return `${channelLabel(channel)} has recent persona-specific evidence, so GrowthOS promotes it for this launch.`
+  if (learningFit === 'worst' && tier === 'off') return `${channelLabel(channel)} underperformed for this persona, so it stays off until the angle changes.`
+  if (learningFit === 'worst') return `${channelLabel(channel)} underperformed for this persona, so GrowthOS keeps it as a supporting test instead of the lead channel.`
   if (fit === 'preferred') return `${channelLabel(channel)} is a preferred persona channel, so GrowthOS prioritizes it for this buyer.`
   if (fit === 'adjacent') return `${channelLabel(channel)} is adjacent to this persona's preferred channels and useful as a supporting test.`
   if (fit === 'mismatch' && tier === 'off') return `${channelLabel(channel)} is not a strong fit for this persona's preferred channels. Enable only with a specific reason.`
@@ -513,27 +553,42 @@ function strategyBrief(
   defaultGoal: string,
   goalRationale: string,
   answerEngine: AnswerEnginePlan,
+  personaLearning: PersonaLearningDigest | null | undefined,
 ): LaunchStrategyBrief {
   const personaName = persona?.name ?? memory.classification.icp ?? memory.brand.audience ?? 'the current audience'
   const primary = channels.filter((c) => c.tier === 'primary').map((c) => channelLabel(c.channel))
   const off = channels.filter((c) => c.tier === 'off').map((c) => channelLabel(c.channel))
   const source = memory.blueprint.vertical === 'other' ? 'fallback playbook' : `${memory.blueprint.vertical.replace(/_/g, ' ')} playbook`
   const confidence = memory.blueprint.vertical === 'other' ? 'medium' : persona ? 'high' : 'medium'
+  const learningEvidence = personaLearningEvidence(personaLearning)
 
   return {
-    summary: `Launch for ${personaName} using the ${source}, with ${defaultGoal} as the operating goal.`,
+    summary: `Launch for ${personaName} using the ${source}, with ${defaultGoal} as the operating goal.${learningEvidence ? ` ${learningEvidence}` : ''}`,
     goalRationale,
     channelRationale: primary.length
-      ? `Primary channels: ${primary.slice(0, 4).join(', ')}. ${off.length ? `Lower-fit channels stay off unless you have a reason: ${off.slice(0, 3).join(', ')}.` : 'No major channel exclusions.'}`
+      ? `Primary channels: ${primary.slice(0, 4).join(', ')}. ${off.length ? `Lower-fit channels stay off unless you have a reason: ${off.slice(0, 3).join(', ')}.` : 'No major channel exclusions.'}${personaLearning?.bestChannel ? ` Persona evidence favors ${personaLearning.bestChannel}.` : ''}`
       : 'No primary channel emerged yet; keep the launch narrow and use the first run to learn.',
     risk: persona?.skepticismLevel === 'high'
       ? 'Biggest risk: copy that sounds generic or over-automated. Use proof, sober language, and specific workflow details.'
       : 'Biggest risk: spreading effort across too many channels before one message has evidence.',
-    learningObjective: answerEngine.recommended
-      ? 'Learn which persona/channel pair produces reusable hooks, then turn strongest answers into SEO and answer-engine assets.'
-      : 'Learn which hook, CTA, and channel combination earns the first measurable response.',
+    learningObjective: personaLearning?.recommendedNext[0]
+      ? `Validate persona learning: ${personaLearning.recommendedNext[0]}`
+      : answerEngine.recommended
+        ? 'Learn which persona/channel pair produces reusable hooks, then turn strongest answers into SEO and answer-engine assets.'
+        : 'Learn which hook, CTA, and channel combination earns the first measurable response.',
     confidence,
   }
+}
+
+function personaLearningEvidence(personaLearning: PersonaLearningDigest | null | undefined): string | null {
+  if (!personaLearning) return null
+  const parts = [
+    personaLearning.insightSignal,
+    personaLearning.bestChannel ? `best channel: ${personaLearning.bestChannel}` : null,
+    personaLearning.worstChannel ? `avoid/rework: ${personaLearning.worstChannel}` : null,
+  ].filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+  if (parts.length === 0) return null
+  return `Recent persona evidence: ${parts.slice(0, 2).join('; ')}.`
 }
 
 function experimentDesign(
@@ -541,12 +596,15 @@ function experimentDesign(
   persona: MarketingPersona | null | undefined,
   channels: LaunchChannelRecommendation[],
   defaultGoal: string,
+  personaLearning: PersonaLearningDigest | null | undefined,
 ): LaunchExperiment[] {
   const primary = channels.filter((c) => c.defaultOn).map((c) => c.channel)
   const personaName = persona?.name ?? memory.classification.icp ?? 'primary buyer'
   const first = primary[0] ? [primary[0]] : ['landing' as const]
   const social = primary.filter((c) => ['linkedin', 'twitter', 'reddit', 'tiktok', 'meta'].includes(c)).slice(0, 2)
   const owned = primary.filter((c) => ['email', 'blog', 'landing'].includes(c)).slice(0, 2)
+  const learnedChannel = personaLearning?.bestChannel ? normalizeChannelAlias(personaLearning.bestChannel) : null
+  const learnedChannelList = learnedChannel ? [learnedChannel] : first
 
   return [
     {
@@ -557,8 +615,10 @@ function experimentDesign(
     },
     {
       name: 'Channel fit test',
-      hypothesis: `${personaName} will reveal the strongest acquisition path through the persona-preferred channel set.`,
-      channels: social.length ? social as LaunchChannel[] : first,
+      hypothesis: personaLearning?.bestChannel
+        ? `${personaName} already showed signal on ${personaLearning.bestChannel}; test whether the same angle can repeat before widening.`
+        : `${personaName} will reveal the strongest acquisition path through the persona-preferred channel set.`,
+      channels: learnedChannel ? learnedChannelList : social.length ? social as LaunchChannel[] : first,
       successMetric: 'best channel by click-through, conversion, or manually logged signal',
     },
     {

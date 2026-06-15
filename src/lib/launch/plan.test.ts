@@ -200,6 +200,57 @@ describe('buildLaunchPlan', () => {
     expect(plan.defaultChannels).toContain('meta')
   })
 
+  it('uses persona learning evidence to promote and demote channels', () => {
+    const persona: MarketingPersona = {
+      id: 'persona-founder',
+      projectId: 'p',
+      name: 'Founder Operator',
+      role: 'Founder',
+      description: null,
+      painPoints: [],
+      objections: [],
+      buyingTriggers: [],
+      desiredOutcomes: [],
+      vocabulary: ['launch', 'ship'],
+      preferredChannels: ['linkedin'],
+      skepticismLevel: 'high',
+      isPrimary: true,
+    }
+
+    const plan = buildLaunchPlan({
+      memory: makeMemory({
+        blueprint: {
+          ...makeMemory().blueprint,
+          vertical: 'b2b_saas',
+        },
+      }),
+      persona,
+      personaLearning: {
+        personaId: 'persona-founder',
+        personaName: 'Founder Operator',
+        campaignId: 'camp_1',
+        updatedAt: '2026-06-14T01:00:00.000Z',
+        insightSignal: 'Direct proof-led email got replies.',
+        bestChannel: 'email',
+        worstChannel: 'linkedin',
+        manualTaskCount: 2,
+        recommendedNext: ['Repeat email with a sharper proof point'],
+        historyCount: 2,
+      },
+    })
+
+    const email = plan.channels.find((c) => c.channel === 'email')
+    const linkedin = plan.channels.find((c) => c.channel === 'linkedin')
+    expect(email?.tier).toBe('primary')
+    expect(email?.reason).toMatch(/persona-specific evidence/i)
+    expect(linkedin?.tier).toBe('secondary')
+    expect(linkedin?.reason).toMatch(/underperformed/i)
+    expect(plan.suggestedAngles[0]).toBe('Repeat email with a sharper proof point')
+    expect(plan.strategy.summary).toMatch(/Recent persona evidence/i)
+    expect(plan.strategy.learningObjective).toContain('Repeat email')
+    expect(plan.experiments[1].channels).toEqual(['email'])
+  })
+
   it('sets engagement as the default goal for experiment-oriented personas', () => {
     const persona: MarketingPersona = {
       id: 'persona-growth',
