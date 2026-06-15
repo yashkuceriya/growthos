@@ -112,6 +112,7 @@ export interface BuildLaunchExecutionBriefArgs {
   goal?: string | null
   angle?: string | null
   priorLearning?: LaunchExecutionLearning | null
+  personaLearning?: PersonaLearningDigest | null
 }
 
 export interface BuildLaunchExecutionChecklistArgs {
@@ -119,6 +120,7 @@ export interface BuildLaunchExecutionChecklistArgs {
   selectedChannels?: LaunchChannel[]
   goal?: string | null
   angle?: string | null
+  personaLearning?: PersonaLearningDigest | null
 }
 
 export function buildLaunchPlan({ memory, persona, personaLearning }: BuildLaunchPlanArgs): LaunchPlan {
@@ -201,6 +203,7 @@ export function buildLaunchExecutionBrief({
   goal,
   angle,
   priorLearning,
+  personaLearning,
 }: BuildLaunchExecutionBriefArgs): string {
   const channels = selectedChannels?.length
     ? plan.channels.filter((c) => selectedChannels.includes(c.channel))
@@ -208,7 +211,7 @@ export function buildLaunchExecutionBrief({
   const channelNames = channels.map((c) => channelLabel(c.channel))
   const selectedGoal = goal?.trim() || plan.defaultGoal
   const selectedAngle = angle?.trim() || plan.defaultAngle || plan.suggestedAngles[0] || 'Pick the strongest problem/outcome angle before publishing.'
-  const checklist = buildLaunchExecutionChecklist({ plan, selectedChannels, goal: selectedGoal, angle: selectedAngle })
+  const checklist = buildLaunchExecutionChecklist({ plan, selectedChannels, goal: selectedGoal, angle: selectedAngle, personaLearning })
   const doNow = priorLearning?.decisionLoop?.doNow ?? []
   const stopDoing = priorLearning?.decisionLoop?.stopDoing ?? []
   const testNext = priorLearning?.decisionLoop?.testNext ?? priorLearning?.recommendedNext ?? []
@@ -230,6 +233,7 @@ export function buildLaunchExecutionBrief({
     `- Learning objective: ${plan.strategy.learningObjective}`,
     `- Risk to watch: ${plan.strategy.risk}`,
     '',
+    ...personaLearningBriefBlock(personaLearning),
     '## Channel actions',
     ...channels.map((c) => `- ${channelLabel(c.channel)} (${c.tier}): ${c.reason}`),
     '',
@@ -277,6 +281,7 @@ export function buildLaunchExecutionChecklist({
   selectedChannels,
   goal,
   angle,
+  personaLearning,
 }: BuildLaunchExecutionChecklistArgs): LaunchExecutionTask[] {
   const channels = selectedChannels?.length
     ? selectedChannels
@@ -294,6 +299,9 @@ export function buildLaunchExecutionChecklist({
     },
   ]
 
+  const personaTask = personaLearningStrategyTask(personaLearning)
+  if (personaTask) tasks.push(personaTask)
+
   for (const rec of selectedChannelRecs) {
     const play = channelExecutionPlay(rec.channel, selectedGoal)
     tasks.push({
@@ -301,7 +309,7 @@ export function buildLaunchExecutionChecklist({
       owner: 'Channel',
       channel: rec.channel,
       title: `Ship ${channelLabel(rec.channel)} asset`,
-      detail: play.action,
+      detail: applyPersonaLearningToChannelAction(rec.channel, play.action, personaLearning),
       metric: play.metric,
     })
   }
@@ -325,6 +333,54 @@ export function buildLaunchExecutionChecklist({
   })
 
   return tasks
+}
+
+function personaLearningBriefBlock(personaLearning: PersonaLearningDigest | null | undefined): string[] {
+  if (!personaLearning) return []
+  const lines = ['', '## Persona learning evidence']
+  if (personaLearning.personaName) lines.push(`- Persona: ${personaLearning.personaName}`)
+  if (personaLearning.insightSignal) lines.push(`- Latest signal: ${personaLearning.insightSignal}`)
+  if (personaLearning.bestChannel) lines.push(`- Learned best channel: ${personaLearning.bestChannel}`)
+  if (personaLearning.worstChannel) lines.push(`- Rework or avoid: ${personaLearning.worstChannel}`)
+  if (personaLearning.manualTaskCount > 0) lines.push(`- Manual tasks completed in evidence: ${personaLearning.manualTaskCount}`)
+  for (const item of personaLearning.recommendedNext.slice(0, 3)) lines.push(`- Persona next test: ${item}`)
+  lines.push(`- Evidence source: campaign ${personaLearning.campaignId}, ${personaLearning.historyCount} recorded run${personaLearning.historyCount === 1 ? '' : 's'}`)
+  lines.push('')
+  return lines
+}
+
+function personaLearningStrategyTask(personaLearning: PersonaLearningDigest | null | undefined): LaunchExecutionTask | null {
+  if (!personaLearning) return null
+  const evidence = [
+    personaLearning.insightSignal ? `signal "${personaLearning.insightSignal}"` : null,
+    personaLearning.bestChannel ? `best channel ${personaLearning.bestChannel}` : null,
+    personaLearning.recommendedNext[0] ? `next test "${personaLearning.recommendedNext[0]}"` : null,
+  ].filter((item): item is string => !!item)
+  if (evidence.length === 0) return null
+  return {
+    id: 'persona-learning-evidence',
+    owner: 'Strategy',
+    title: 'Apply persona learning evidence',
+    detail: `Before publishing, align the angle and first channel with ${evidence.slice(0, 3).join('; ')}.`,
+    metric: 'Launch choices explicitly reflect the latest persona learning',
+  }
+}
+
+function applyPersonaLearningToChannelAction(
+  channel: LaunchChannel,
+  action: string,
+  personaLearning: PersonaLearningDigest | null | undefined,
+): string {
+  if (!personaLearning) return action
+  const best = personaLearning.bestChannel ? normalizeChannelAlias(personaLearning.bestChannel) : null
+  const worst = personaLearning.worstChannel ? normalizeChannelAlias(personaLearning.worstChannel) : null
+  if (best === channel) {
+    return `${action} This is the learned best channel for ${personaLearning.personaName ?? 'this persona'}; reuse the latest proven angle before widening.`
+  }
+  if (worst === channel) {
+    return `${action} This channel underperformed for ${personaLearning.personaName ?? 'this persona'}; change the angle or keep the test very small.`
+  }
+  return action
 }
 
 // Pulls 3-4 narrative-angle starters out of memory. Prefers angles distilled

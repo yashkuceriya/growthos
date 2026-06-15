@@ -349,6 +349,42 @@ describe('buildLaunchPlan', () => {
     expect(brief).toContain('Test next: Try a comparison landing page')
   })
 
+  it('includes persona learning evidence in local briefs and manual tasks', () => {
+    const plan = buildLaunchPlan({ memory: makeMemory() })
+    const personaLearning = {
+      personaId: 'persona-founder',
+      personaName: 'Founder Operator',
+      campaignId: 'camp_1',
+      updatedAt: '2026-06-15T01:00:00.000Z',
+      insightSignal: 'Proof-led email got qualified replies.',
+      bestChannel: 'email',
+      worstChannel: 'linkedin',
+      manualTaskCount: 2,
+      recommendedNext: ['Repeat email with a sharper proof point'],
+      historyCount: 3,
+    }
+
+    const brief = buildLaunchExecutionBrief({
+      plan,
+      selectedChannels: ['email', 'linkedin'],
+      personaName: 'Founder Operator',
+      personaLearning,
+    })
+    expect(brief).toContain('## Persona learning evidence')
+    expect(brief).toContain('Latest signal: Proof-led email got qualified replies.')
+    expect(brief).toContain('Learned best channel: email')
+    expect(brief).toContain('Persona next test: Repeat email with a sharper proof point')
+
+    const checklist = buildLaunchExecutionChecklist({
+      plan,
+      selectedChannels: ['email', 'linkedin'],
+      personaLearning,
+    })
+    expect(checklist.some((task) => task.id === 'persona-learning-evidence')).toBe(true)
+    expect(checklist.find((task) => task.id === 'channel-email')?.detail).toMatch(/learned best channel/i)
+    expect(checklist.find((task) => task.id === 'channel-linkedin')?.detail).toMatch(/underperformed/i)
+  })
+
   it('builds manual execution tasks and metrics for selected channels', () => {
     const plan = buildLaunchPlan({ memory: makeMemory() })
 

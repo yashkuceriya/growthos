@@ -117,6 +117,19 @@ interface LaunchPlan {
   source: 'classification' | 'fallback'
 }
 
+interface PersonaLearningDigest {
+  personaId: string
+  personaName: string | null
+  campaignId: string
+  updatedAt: string
+  insightSignal: string | null
+  bestChannel: string | null
+  worstChannel: string | null
+  manualTaskCount: number
+  recommendedNext: string[]
+  historyCount: number
+}
+
 interface LearningChannel {
   channel: string
   reason: string
@@ -166,6 +179,7 @@ export default function LaunchPage() {
   const [angle, setAngle] = useState<string>('')
   const [personas, setPersonas] = useState<MarketingPersona[]>([])
   const [selectedPersonaId, setSelectedPersonaId] = useState<string>('')
+  const [personaLearning, setPersonaLearning] = useState<PersonaLearningDigest | null>(null)
   const [personaLoading, setPersonaLoading] = useState(false)
   const [priorLearning, setPriorLearning] = useState<LearningSummary | null>(null)
   const [priorLearningLoading, setPriorLearningLoading] = useState(false)
@@ -253,12 +267,14 @@ export default function LaunchPage() {
         const body = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string }
         throw new Error(body.error ?? `Plan request failed: ${res.status}`)
       }
-      const body = (await res.json()) as { plan: LaunchPlan }
+      const body = (await res.json()) as { plan: LaunchPlan; personaLearning?: PersonaLearningDigest | null }
       setPlan(body.plan)
+      setPersonaLearning(body.personaLearning ?? null)
       setSelectedChannels(new Set(body.plan.defaultChannels))
       setGoal(body.plan.defaultGoal)
       setAngle(body.plan.defaultAngle ?? '')
     } catch (err) {
+      setPersonaLearning(null)
       setPlanError(err instanceof Error ? err.message : 'Failed to load plan')
     } finally {
       setPlanLoading(false)
@@ -537,6 +553,7 @@ export default function LaunchPage() {
           projectName={activeProject.name}
           personaName={selectedPersona?.name ?? null}
           priorLearning={priorLearning}
+          personaLearning={personaLearning}
           selected={selectedChannels}
           goal={goal}
           angle={angle}
@@ -1084,7 +1101,7 @@ function DecisionSnippet({ label, items }: { label: string; items: string[] }) {
 
 function PlanPreview({
   plan, loading, error, selected, goal, angle,
-  projectName, personaName, priorLearning,
+  projectName, personaName, priorLearning, personaLearning,
   onToggleChannel, onChangeGoal, onChangeAngle, onReload, onCopyBrief,
   onSaveManualCampaign, savingManualCampaign,
 }: {
@@ -1094,6 +1111,7 @@ function PlanPreview({
   projectName: string
   personaName: string | null
   priorLearning: LearningSummary | null
+  personaLearning: PersonaLearningDigest | null
   selected: Set<ChannelKey>
   goal: string
   angle: string
@@ -1131,6 +1149,7 @@ function PlanPreview({
     selectedChannels: Array.from(selected),
     goal,
     angle,
+    personaLearning,
   })
   const completedTaskCount = checklist.filter((task) => doneTaskIds.has(task.id)).length
   const copyLocalBrief = () => {
@@ -1142,6 +1161,7 @@ function PlanPreview({
       goal,
       angle,
       priorLearning,
+      personaLearning,
     }))
   }
   const buildManualPayload = () => {
@@ -1154,6 +1174,7 @@ function PlanPreview({
       goal,
       angle,
       priorLearning,
+      personaLearning,
     })
     const tasks = checklist.map((task) => ({
       ...task,
