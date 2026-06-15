@@ -1,4 +1,5 @@
 import type { LearningSummary } from '@/lib/campaigns/learning'
+import type { MarketingPersona } from '@/lib/marketing/personas'
 
 export interface CampaignPersonaLearning {
   campaign_id: string
@@ -27,6 +28,22 @@ export interface PersonaLearningDigest {
   worstChannel: string | null
   manualTaskCount: number
   recommendedNext: string[]
+  historyCount: number
+}
+
+export interface PersonaExperimentRow {
+  personaId: string
+  personaName: string
+  role: string | null
+  isPrimary: boolean
+  confidence: 'strong' | 'learning' | 'cold'
+  evidenceScore: number
+  bestChannel: string | null
+  reworkChannel: string | null
+  insight: string
+  nextTest: string
+  launchHref: string
+  updatedAt: string | null
   historyCount: number
 }
 
@@ -102,12 +119,74 @@ export function latestPersonaLearningDigest(brandVoice: Record<string, unknown> 
   return digests.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0]
 }
 
+export function buildPersonaExperimentBoard(
+  personas: MarketingPersona[],
+  learningByPersona: Record<string, PersonaLearningDigest>,
+): PersonaExperimentRow[] {
+  return personas
+    .map((persona) => {
+      const learning = learningByPersona[persona.id] ?? null
+      const evidenceScore = personaEvidenceScore(learning)
+      const bestChannel = learning?.bestChannel ?? persona.preferredChannels[0] ?? null
+      const nextTest = learning?.recommendedNext[0]
+        ?? (bestChannel
+          ? `Run a focused ${bestChannel} test for ${persona.name}`
+          : `Run a small launch test for ${persona.name}`)
+      return {
+        personaId: persona.id,
+        personaName: persona.name,
+        role: persona.role,
+        isPrimary: persona.isPrimary,
+        confidence: personaConfidence(evidenceScore),
+        evidenceScore,
+        bestChannel,
+        reworkChannel: learning?.worstChannel ?? null,
+        insight: learning?.insightSignal
+          ?? `${persona.name} has no captured launch evidence yet.`,
+        nextTest,
+        launchHref: `/launch?personaId=${encodeURIComponent(persona.id)}`,
+        updatedAt: learning?.updatedAt ?? null,
+        historyCount: learning?.historyCount ?? 0,
+      } satisfies PersonaExperimentRow
+    })
+    .sort((a, b) => {
+      if (a.confidence !== b.confidence) return confidenceRank(b.confidence) - confidenceRank(a.confidence)
+      if (a.evidenceScore !== b.evidenceScore) return b.evidenceScore - a.evidenceScore
+      if (a.isPrimary !== b.isPrimary) return a.isPrimary ? -1 : 1
+      return a.personaName.localeCompare(b.personaName)
+    })
+}
+
 export function personaInsightSignal(summary: LearningSummary): string | null {
   if (summary.strongestHook) return summary.strongestHook
   if (summary.bestChannel) return `Best channel: ${summary.bestChannel.channel}`
   if (summary.recommendedNext.length > 0) return summary.recommendedNext[0]
   if (summary.inputCounts.manualTasks > 0) return `${summary.inputCounts.manualTasks} manual task${summary.inputCounts.manualTasks === 1 ? '' : 's'} completed`
   return null
+}
+
+function personaEvidenceScore(learning: PersonaLearningDigest | null): number {
+  if (!learning) return 0
+  let score = 0
+  if (learning.insightSignal) score += 2
+  if (learning.bestChannel) score += 2
+  if (learning.worstChannel) score += 1
+  if (learning.recommendedNext.length > 0) score += 1
+  score += Math.min(learning.historyCount, 4)
+  if (learning.manualTaskCount > 0) score += 1
+  return score
+}
+
+function personaConfidence(score: number): PersonaExperimentRow['confidence'] {
+  if (score >= 7) return 'strong'
+  if (score > 0) return 'learning'
+  return 'cold'
+}
+
+function confidenceRank(confidence: PersonaExperimentRow['confidence']): number {
+  if (confidence === 'strong') return 3
+  if (confidence === 'learning') return 2
+  return 1
 }
 
 function readLearningDigest(personaId: string, raw: unknown, historyCount: number): PersonaLearningDigest | null {

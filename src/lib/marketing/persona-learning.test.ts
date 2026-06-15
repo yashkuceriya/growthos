@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { LearningSummary } from '@/lib/campaigns/learning'
-import { buildCampaignPersonaLearning, campaignPersonaFromMetadata, latestPersonaLearningDigest, mergeCampaignPersonaLearning, personaInsightSignal, personaLearningDigestMap } from './persona-learning'
+import type { MarketingPersona } from './personas'
+import { buildCampaignPersonaLearning, buildPersonaExperimentBoard, campaignPersonaFromMetadata, latestPersonaLearningDigest, mergeCampaignPersonaLearning, personaInsightSignal, personaLearningDigestMap } from './persona-learning'
 
 function summary(overrides: Partial<LearningSummary> = {}): LearningSummary {
   return {
@@ -13,6 +14,25 @@ function summary(overrides: Partial<LearningSummary> = {}): LearningSummary {
     decisionLoop: { doNow: [], stopDoing: [], testNext: [] },
     reusableStyleNotes: [],
     inputCounts: { metrics: 0, ads: 0, social: 0, email: 0, manualTasks: 0 },
+    ...overrides,
+  }
+}
+
+function persona(overrides: Partial<MarketingPersona> = {}): MarketingPersona {
+  return {
+    id: 'persona-founder',
+    projectId: 'proj_1',
+    name: 'Founder Operator',
+    role: 'Founder',
+    description: 'Ships and markets apps directly.',
+    painPoints: [],
+    objections: [],
+    buyingTriggers: [],
+    desiredOutcomes: [],
+    vocabulary: [],
+    preferredChannels: ['email', 'linkedin'],
+    skepticismLevel: 'high',
+    isPrimary: false,
     ...overrides,
   }
 }
@@ -142,5 +162,64 @@ describe('campaign persona learning', () => {
 
     expect(digest?.personaId).toBe('latest')
     expect(digest?.personaName).toBe('Latest')
+  })
+
+  it('builds a ranked persona experiment board from evidence', () => {
+    const rows = buildPersonaExperimentBoard([
+      persona({ id: 'cold', name: 'Cold Persona', preferredChannels: ['reddit'] }),
+      persona({ id: 'strong', name: 'Strong Persona', isPrimary: true }),
+      persona({ id: 'learning', name: 'Learning Persona' }),
+    ], {
+      strong: {
+        personaId: 'strong',
+        personaName: 'Strong Persona',
+        campaignId: 'camp_1',
+        updatedAt: '2026-06-15T01:00:00.000Z',
+        insightSignal: 'Proof-led email created replies.',
+        bestChannel: 'email',
+        worstChannel: 'linkedin',
+        manualTaskCount: 2,
+        recommendedNext: ['Repeat the proof-led email angle'],
+        historyCount: 3,
+      },
+      learning: {
+        personaId: 'learning',
+        personaName: 'Learning Persona',
+        campaignId: 'camp_2',
+        updatedAt: '2026-06-15T02:00:00.000Z',
+        insightSignal: null,
+        bestChannel: null,
+        worstChannel: null,
+        manualTaskCount: 0,
+        recommendedNext: ['Try a small LinkedIn proof post'],
+        historyCount: 1,
+      },
+    })
+
+    expect(rows.map((row) => row.personaId)).toEqual(['strong', 'learning', 'cold'])
+    expect(rows[0]).toEqual(expect.objectContaining({
+      confidence: 'strong',
+      evidenceScore: 10,
+      bestChannel: 'email',
+      reworkChannel: 'linkedin',
+      nextTest: 'Repeat the proof-led email angle',
+      launchHref: '/launch?personaId=strong',
+    }))
+    expect(rows[1].confidence).toBe('learning')
+  })
+
+  it('creates cold-start experiment rows when a persona has no learning yet', () => {
+    const [row] = buildPersonaExperimentBoard([
+      persona({ id: 'persona new', name: 'New Builder', preferredChannels: ['landing'] }),
+    ], {})
+
+    expect(row).toEqual(expect.objectContaining({
+      confidence: 'cold',
+      evidenceScore: 0,
+      bestChannel: 'landing',
+      insight: 'New Builder has no captured launch evidence yet.',
+      nextTest: 'Run a focused landing test for New Builder',
+      launchHref: '/launch?personaId=persona%20new',
+    }))
   })
 })

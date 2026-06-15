@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Brain, CheckCircle2, History, Lightbulb, Loader2, Plus, RefreshCw, Target, TrendingDown, TrendingUp, Users } from 'lucide-react'
+import { ArrowRight, Brain, CheckCircle2, FlaskConical, History, Lightbulb, Loader2, Plus, RefreshCw, Target, TrendingDown, TrendingUp, Users } from 'lucide-react'
 import { PageShell } from '@/components/ui/page-shell'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { useProject } from '@/hooks/use-project'
 import type { MarketingPersona, PersonaSkepticism } from '@/lib/marketing/personas'
+import { buildPersonaExperimentBoard, type PersonaExperimentRow, type PersonaLearningDigest } from '@/lib/marketing/persona-learning'
 import { cn } from '@/lib/utils'
 
 const EMPTY_FORM = {
@@ -23,19 +24,6 @@ const EMPTY_FORM = {
   preferredChannels: '',
   skepticismLevel: 'medium' as PersonaSkepticism,
   isPrimary: false,
-}
-
-interface PersonaLearningDigest {
-  personaId: string
-  personaName: string | null
-  campaignId: string
-  updatedAt: string
-  insightSignal: string | null
-  bestChannel: string | null
-  worstChannel: string | null
-  manualTaskCount: number
-  recommendedNext: string[]
-  historyCount: number
 }
 
 export default function PersonasPage() {
@@ -53,6 +41,10 @@ export default function PersonasPage() {
     [personas, selectedId],
   )
   const selectedLearning = selected ? personaLearning[selected.id] ?? null : null
+  const experimentRows = useMemo(
+    () => buildPersonaExperimentBoard(personas, personaLearning),
+    [personas, personaLearning],
+  )
 
   async function load() {
     if (!activeProject?.id) return
@@ -171,6 +163,8 @@ export default function PersonasPage() {
         </div>
       )}
 
+      <PersonaExperimentBoard rows={experimentRows} onSelect={setSelectedId} />
+
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <SectionPanel title={`${personas.length} persona${personas.length === 1 ? '' : 's'}`} contentClassName="p-0">
           {loading && personas.length === 0 ? (
@@ -276,6 +270,70 @@ export default function PersonasPage() {
       </div>
     </PageShell>
   )
+}
+
+function PersonaExperimentBoard({ rows, onSelect }: { rows: PersonaExperimentRow[]; onSelect: (id: string) => void }) {
+  const readyCount = rows.filter((row) => row.confidence === 'strong').length
+  const coldCount = rows.filter((row) => row.confidence === 'cold').length
+  return (
+    <SectionPanel
+      title="Persona Experiment Board"
+      action={
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusPill tone="success">{readyCount} ready</StatusPill>
+          <StatusPill tone={coldCount > 0 ? 'warn' : 'neutral'}>{coldCount} cold</StatusPill>
+        </div>
+      }
+      className="mb-4"
+    >
+      {rows.length === 0 ? (
+        <p className="text-sm text-slate-500">Create or infer personas to start planning persona-specific experiments.</p>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+          {rows.slice(0, 3).map((row) => (
+            <article key={row.personaId} className="rounded-md border border-slate-800 bg-slate-900/55 p-3">
+              <div className="mb-3 flex items-start justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => onSelect(row.personaId)}
+                  className="min-w-0 text-left"
+                >
+                  <div className="truncate text-sm font-semibold text-slate-100">{row.personaName}</div>
+                  <div className="mt-1 text-xs text-slate-500">{row.role ?? 'Persona'} · evidence {row.evidenceScore}</div>
+                </button>
+                <StatusPill tone={confidenceTone(row.confidence)}>{row.confidence}</StatusPill>
+              </div>
+              <div className="mb-3 flex flex-wrap gap-2">
+                {row.bestChannel && <StatusPill tone="info"><TrendingUp className="h-3 w-3" /> {row.bestChannel}</StatusPill>}
+                {row.reworkChannel && <StatusPill tone="warn"><TrendingDown className="h-3 w-3" /> rework {row.reworkChannel}</StatusPill>}
+                {row.historyCount > 0 && <StatusPill tone="neutral"><History className="h-3 w-3" /> {row.historyCount} run{row.historyCount === 1 ? '' : 's'}</StatusPill>}
+              </div>
+              <p className="line-clamp-2 min-h-10 text-xs leading-5 text-slate-400">{row.insight}</p>
+              <div className="mt-3 rounded border border-slate-800 bg-slate-950/60 p-2">
+                <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                  <FlaskConical className="h-3 w-3 text-emerald-300" />
+                  Next test
+                </div>
+                <p className="line-clamp-2 min-h-10 text-xs leading-5 text-slate-300">{row.nextTest}</p>
+              </div>
+              <a
+                href={row.launchHref}
+                className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-300 hover:text-emerald-200"
+              >
+                Launch test <ArrowRight className="h-3.5 w-3.5" />
+              </a>
+            </article>
+          ))}
+        </div>
+      )}
+    </SectionPanel>
+  )
+}
+
+function confidenceTone(confidence: PersonaExperimentRow['confidence']) {
+  if (confidence === 'strong') return 'success'
+  if (confidence === 'learning') return 'info'
+  return 'warn'
 }
 
 function PersonaLearningBlock({ learning }: { learning: PersonaLearningDigest | null }) {
