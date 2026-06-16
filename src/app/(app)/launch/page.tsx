@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import type { ReactNode } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useProject } from '@/hooks/use-project'
@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils'
 import { QualityVerdict } from '@/components/marketing/quality-verdict'
 import type { GeneratedQualityScore } from '@/lib/marketing/quality'
 import type { MarketingPersona } from '@/lib/marketing/personas'
+import { buildPersonaExperimentBoard, type PersonaExperimentRow, type PersonaLearningDigest } from '@/lib/marketing/persona-learning'
 import { buildLaunchExecutionBrief, buildLaunchExecutionChecklist } from '@/lib/launch/plan'
 
 type ChannelKey = 'meta' | 'linkedin' | 'tiktok' | 'twitter' | 'reddit' | 'email' | 'blog' | 'landing'
@@ -117,19 +118,6 @@ interface LaunchPlan {
   source: 'classification' | 'fallback'
 }
 
-interface PersonaLearningDigest {
-  personaId: string
-  personaName: string | null
-  campaignId: string
-  updatedAt: string
-  insightSignal: string | null
-  bestChannel: string | null
-  worstChannel: string | null
-  manualTaskCount: number
-  recommendedNext: string[]
-  historyCount: number
-}
-
 interface LearningChannel {
   channel: string
   reason: string
@@ -180,6 +168,7 @@ export default function LaunchPage() {
   const [personas, setPersonas] = useState<MarketingPersona[]>([])
   const [selectedPersonaId, setSelectedPersonaId] = useState<string>('')
   const [personaLearning, setPersonaLearning] = useState<PersonaLearningDigest | null>(null)
+  const [personaLearningByPersona, setPersonaLearningByPersona] = useState<Record<string, PersonaLearningDigest>>({})
   const [personaLoading, setPersonaLoading] = useState(false)
   const [priorLearning, setPriorLearning] = useState<LearningSummary | null>(null)
   const [priorLearningLoading, setPriorLearningLoading] = useState(false)
@@ -270,6 +259,12 @@ export default function LaunchPage() {
       const body = (await res.json()) as { plan: LaunchPlan; personaLearning?: PersonaLearningDigest | null }
       setPlan(body.plan)
       setPersonaLearning(body.personaLearning ?? null)
+      if (body.personaLearning) {
+        setPersonaLearningByPersona((current) => ({
+          ...current,
+          [body.personaLearning!.personaId]: body.personaLearning!,
+        }))
+      }
       setSelectedChannels(new Set(body.plan.defaultChannels))
       setGoal(body.plan.defaultGoal)
       setAngle(body.plan.defaultAngle ?? '')
@@ -299,6 +294,7 @@ export default function LaunchPage() {
       if (!res.ok) throw new Error(body.error ?? 'Could not load persona')
       const nextPersonas = (body.personas ?? []) as MarketingPersona[]
       setPersonas(nextPersonas)
+      setPersonaLearningByPersona((body.personaLearning ?? {}) as Record<string, PersonaLearningDigest>)
       setSelectedPersonaId((current) => {
         if (requestedPersonaId && nextPersonas.some((persona) => persona.id === requestedPersonaId)) return requestedPersonaId
         if (current && nextPersonas.some((persona) => persona.id === current)) return current
@@ -306,6 +302,7 @@ export default function LaunchPage() {
       })
     } catch {
       setPersonas([])
+      setPersonaLearningByPersona({})
       setSelectedPersonaId('')
     } finally {
       setPersonaLoading(false)
@@ -468,13 +465,20 @@ export default function LaunchPage() {
     }
   }
 
-  if (!activeProject) {
-    return <PageShell><p className="text-slate-400">Select a project first</p></PageShell>
-  }
-
   const readyCount = Object.values(states).filter((s) => s.status === 'ready').length
   const failedCount = Object.values(states).filter((s) => s.status === 'failed').length
   const selectedPersona = personas.find((persona) => persona.id === selectedPersonaId) ?? personas[0] ?? null
+  const personaExperimentRows = useMemo(
+    () => buildPersonaExperimentBoard(personas, personaLearningByPersona),
+    [personas, personaLearningByPersona],
+  )
+  const selectedPersonaExperiment = selectedPersona
+    ? personaExperimentRows.find((row) => row.personaId === selectedPersona.id) ?? null
+    : null
+
+  if (!activeProject) {
+    return <PageShell><p className="text-slate-400">Select a project first</p></PageShell>
+  }
 
   return (
     <PageShell>
@@ -534,6 +538,8 @@ export default function LaunchPage() {
           personas={personas}
           selectedPersonaId={selectedPersonaId}
           persona={selectedPersona}
+          experimentRows={personaExperimentRows}
+          selectedExperiment={selectedPersonaExperiment}
           loading={personaLoading}
           onChangePersona={setSelectedPersonaId}
         />
@@ -914,15 +920,24 @@ function PrimaryPersonaPanel({
   personas,
   selectedPersonaId,
   persona,
+  experimentRows,
+  selectedExperiment,
   loading,
   onChangePersona,
 }: {
   personas: MarketingPersona[]
   selectedPersonaId: string
   persona: MarketingPersona | null
+  experimentRows: PersonaExperimentRow[]
+  selectedExperiment: PersonaExperimentRow | null
   loading: boolean
   onChangePersona: (id: string) => void
 }) {
+  const rowByPersona = useMemo(
+    () => new Map(experimentRows.map((row) => [row.personaId, row])),
+    [experimentRows],
+  )
+
   return (
     <div className="mb-4 rounded-md border border-slate-800 bg-slate-900/45 p-4">
       <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
@@ -934,6 +949,7 @@ function PrimaryPersonaPanel({
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-sm font-semibold text-slate-100">Primary Persona</h2>
               {persona && <StatusPill tone={persona.skepticismLevel === 'high' ? 'warn' : 'info'}>{persona.skepticismLevel} skepticism</StatusPill>}
+              {selectedExperiment && <StatusPill tone={personaConfidenceTone(selectedExperiment.confidence)}>{selectedExperiment.confidence} evidence</StatusPill>}
             </div>
             <p className="mt-1 text-xs leading-5 text-slate-400">
               {persona
@@ -955,7 +971,7 @@ function PrimaryPersonaPanel({
             >
               {personas.map((option) => (
                 <option key={option.id} value={option.id}>
-                  {option.name}{option.role ? ` · ${option.role}` : ''}{option.isPrimary ? ' · Primary' : ''}
+                  {launchPersonaOptionLabel(option, rowByPersona.get(option.id) ?? null)}
                 </option>
               ))}
             </select>
@@ -970,12 +986,61 @@ function PrimaryPersonaPanel({
       </div>
 
       {persona && (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <PersonaSnippet label="Pains" items={persona.painPoints} />
-          <PersonaSnippet label="Outcomes" items={persona.desiredOutcomes} />
-          <PersonaSnippet label="Objections" items={persona.objections} />
+        <div className="space-y-3">
+          {selectedExperiment && (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <PersonaEvidenceSnippet
+                icon={<TrendingUp className="h-3.5 w-3.5" />}
+                label="Best channel"
+                value={selectedExperiment.bestChannel ?? 'No channel signal yet'}
+              />
+              <PersonaEvidenceSnippet
+                icon={<Target className="h-3.5 w-3.5" />}
+                label="Next test"
+                value={selectedExperiment.nextTest}
+              />
+              <PersonaEvidenceSnippet
+                icon={<History className="h-3.5 w-3.5" />}
+                label="Evidence"
+                value={`${selectedExperiment.evidenceScore} score · ${selectedExperiment.historyCount} run${selectedExperiment.historyCount === 1 ? '' : 's'}`}
+              />
+            </div>
+          )}
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <PersonaSnippet label="Pains" items={persona.painPoints} />
+            <PersonaSnippet label="Outcomes" items={persona.desiredOutcomes} />
+            <PersonaSnippet label="Objections" items={persona.objections} />
+          </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function launchPersonaOptionLabel(persona: MarketingPersona, experiment: PersonaExperimentRow | null): string {
+  const parts = [
+    persona.name,
+    persona.role,
+    persona.isPrimary ? 'Primary' : null,
+    experiment ? `${experiment.confidence} evidence ${experiment.evidenceScore}` : null,
+  ].filter((part): part is string => Boolean(part))
+  return parts.join(' · ')
+}
+
+function personaConfidenceTone(confidence: PersonaExperimentRow['confidence']) {
+  if (confidence === 'strong') return 'success'
+  if (confidence === 'learning') return 'info'
+  return 'warn'
+}
+
+function PersonaEvidenceSnippet({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-md border border-emerald-500/20 bg-emerald-500/5 p-3">
+      <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-300">
+        {icon}
+        {label}
+      </div>
+      <p className="line-clamp-2 text-xs leading-5 text-slate-200">{value}</p>
     </div>
   )
 }
