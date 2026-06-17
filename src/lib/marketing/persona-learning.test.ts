@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { LearningSummary } from '@/lib/campaigns/learning'
 import type { MarketingPersona } from './personas'
-import { buildCampaignPersonaLearning, buildPersonaExperimentBoard, campaignPersonaFromMetadata, latestPersonaLearningDigest, mergeCampaignPersonaLearning, personaInsightSignal, personaLearningDigestMap } from './persona-learning'
+import { buildCampaignPersonaLearning, buildPersonaExperimentBoard, campaignPersonaFromMetadata, latestPersonaLearningDigest, mergeCampaignPersonaLearning, personaInsightSignal, personaLearningDigestMap, personaLearningTimeline } from './persona-learning'
 
 function summary(overrides: Partial<LearningSummary> = {}): LearningSummary {
   return {
@@ -221,5 +221,62 @@ describe('campaign persona learning', () => {
       nextTest: 'Run a focused landing test for New Builder',
       launchHref: '/launch?personaId=persona%20new',
     }))
+  })
+
+  it('builds a newest-first persona learning timeline without duplicate current entries', () => {
+    const timeline = personaLearningTimeline({
+      insights: {
+        persona_current: {
+          'persona-founder': {
+            campaign_id: 'camp_2',
+            timestamp: '2026-06-17T02:00:00.000Z',
+            persona: { id: 'persona-founder', name: 'Founder Operator' },
+            insight_signal: 'Proof-led email repeated the signal.',
+            best_channel: 'email',
+            worst_channel: 'linkedin',
+            manual_task_count: 3,
+            recommended_next: ['Test a tighter proof point'],
+          },
+        },
+        persona_history: {
+          'persona-founder': [
+            {
+              campaign_id: 'camp_1',
+              timestamp: '2026-06-16T02:00:00.000Z',
+              persona: { id: 'persona-founder', name: 'Founder Operator' },
+              insight_signal: 'Direct email earned the first replies.',
+              best_channel: 'email',
+              manual_task_count: 1,
+              recommended_next: ['Repeat email'],
+            },
+            {
+              campaign_id: 'camp_2',
+              timestamp: '2026-06-17T02:00:00.000Z',
+              persona: { id: 'persona-founder', name: 'Founder Operator' },
+              insight_signal: 'Proof-led email repeated the signal.',
+              best_channel: 'email',
+              worst_channel: 'linkedin',
+              manual_task_count: 3,
+              recommended_next: ['Test a tighter proof point'],
+            },
+          ],
+        },
+      },
+    }, 'persona-founder')
+
+    expect(timeline).toHaveLength(2)
+    expect(timeline.map((entry) => entry.campaignId)).toEqual(['camp_2', 'camp_1'])
+    expect(timeline[0]).toEqual(expect.objectContaining({
+      insightSignal: 'Proof-led email repeated the signal.',
+      bestChannel: 'email',
+      worstChannel: 'linkedin',
+      manualTaskCount: 3,
+      recommendedNext: ['Test a tighter proof point'],
+    }))
+  })
+
+  it('returns an empty timeline for missing personas or malformed history', () => {
+    expect(personaLearningTimeline({ insights: { persona_history: { persona: [{ campaign_id: 'missing timestamp' }] } } }, 'persona')).toEqual([])
+    expect(personaLearningTimeline({}, null)).toEqual([])
   })
 })

@@ -47,6 +47,17 @@ export interface PersonaExperimentRow {
   historyCount: number
 }
 
+export interface PersonaLearningTimelineEntry {
+  campaignId: string
+  updatedAt: string
+  personaName: string | null
+  insightSignal: string | null
+  bestChannel: string | null
+  worstChannel: string | null
+  manualTaskCount: number
+  recommendedNext: string[]
+}
+
 export function campaignPersonaFromMetadata(metadata: Record<string, unknown> | null | undefined): CampaignPersonaLearning['persona'] | null {
   const direct = readPersona(metadata?.persona)
   if (direct) return direct
@@ -117,6 +128,26 @@ export function latestPersonaLearningDigest(brandVoice: Record<string, unknown> 
   const digests = Object.values(personaLearningDigestMap(brandVoice))
   if (digests.length === 0) return null
   return digests.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0]
+}
+
+export function personaLearningTimeline(
+  brandVoice: Record<string, unknown> | null | undefined,
+  personaId: string | null | undefined,
+): PersonaLearningTimelineEntry[] {
+  if (!personaId) return []
+  const insights = readObjectMap(brandVoice?.insights)
+  const history = readHistoryMap(insights.persona_history)[personaId] ?? []
+  const current = readObjectMap(insights.persona_current)[personaId]
+  const candidates = current ? [...history, current] : history
+  const byKey = new Map<string, PersonaLearningTimelineEntry>()
+  for (const raw of candidates) {
+    const entry = readTimelineEntry(raw)
+    if (!entry) continue
+    byKey.set(`${entry.campaignId}:${entry.updatedAt}`, entry)
+  }
+  return Array.from(byKey.values())
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+    .slice(0, 5)
 }
 
 export function buildPersonaExperimentBoard(
@@ -209,6 +240,26 @@ function readLearningDigest(personaId: string, raw: unknown, historyCount: numbe
     manualTaskCount: typeof row.manual_task_count === 'number' ? row.manual_task_count : 0,
     recommendedNext: recommended,
     historyCount,
+  }
+}
+
+function readTimelineEntry(raw: unknown): PersonaLearningTimelineEntry | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const row = raw as Record<string, unknown>
+  const campaignId = typeof row.campaign_id === 'string' ? row.campaign_id : null
+  const updatedAt = typeof row.timestamp === 'string' ? row.timestamp : null
+  if (!campaignId || !updatedAt) return null
+  return {
+    campaignId,
+    updatedAt,
+    personaName: readDigestPersonaName(row.persona),
+    insightSignal: typeof row.insight_signal === 'string' ? row.insight_signal : null,
+    bestChannel: typeof row.best_channel === 'string' ? row.best_channel : null,
+    worstChannel: typeof row.worst_channel === 'string' ? row.worst_channel : null,
+    manualTaskCount: typeof row.manual_task_count === 'number' ? row.manual_task_count : 0,
+    recommendedNext: Array.isArray(row.recommended_next)
+      ? row.recommended_next.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).slice(0, 3)
+      : [],
   }
 }
 

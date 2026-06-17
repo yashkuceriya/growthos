@@ -9,7 +9,7 @@ import { PageHeader } from '@/components/ui/page-header'
 import { SectionPanel } from '@/components/ui/section-panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { JsonView } from '@/components/ui/json-viewer'
-import { ChevronLeft, FileText, Mail, MessageSquare, Globe, Target, Trophy, Archive, Rocket, Users, Download, ExternalLink, Copy, Link as LinkIcon, ListChecks, CheckCircle2 } from 'lucide-react'
+import { ChevronLeft, FileText, Mail, MessageSquare, Globe, Target, Trophy, Archive, Rocket, Users, Download, ExternalLink, Copy, Link as LinkIcon, ListChecks, CheckCircle2, History, TrendingDown, TrendingUp } from 'lucide-react'
 import { toast } from 'sonner'
 import { ManualMetricsLogger } from '@/components/campaigns/manual-metrics-logger'
 import { LearningSummaryPanel } from '@/components/campaigns/learning-summary'
@@ -17,6 +17,7 @@ import { LaunchScheduleStrip } from '@/components/campaigns/launch-schedule-stri
 import { NextBestActionPanel } from '@/components/dashboard/next-best-action'
 import { buildAssetTrackingUrl, campaignSlugFor, composerLabelFor, composerLinkFor } from '@/lib/publishing/links'
 import { readManualWorklog, type ManualWorklog } from '@/lib/launch/manual-worklog'
+import { personaLearningTimeline, type PersonaLearningTimelineEntry } from '@/lib/marketing/persona-learning'
 
 interface Campaign {
   id: string
@@ -92,6 +93,7 @@ export default function CampaignDetailPage() {
   const supabase = createClient()
   const [campaign, setCampaign] = useState<Campaign | null>(null)
   const [projectWebsite, setProjectWebsite] = useState<string | null>(null)
+  const [projectBrandVoice, setProjectBrandVoice] = useState<Record<string, unknown> | null>(null)
   const [ads, setAds] = useState<AdCopyRow[]>([])
   const [boardAssets, setBoardAssets] = useState<UnifiedAsset[]>([])
   const [summary, setSummary] = useState<AssetsResponse['summary'] | null>(null)
@@ -107,6 +109,7 @@ export default function CampaignDetailPage() {
 
   async function loadAll() {
     setLoading(true)
+    setProjectBrandVoice(null)
     const [cRes, assetsRes, adsForPromoteRes] = await Promise.all([
       supabase
         .from('campaigns')
@@ -126,10 +129,12 @@ export default function CampaignDetailPage() {
     if (campaignRow?.project_id) {
       const { data: projectRow } = await supabase
         .from('projects')
-        .select('website')
+        .select('website, brand_voice')
         .eq('id', campaignRow.project_id)
         .maybeSingle()
-      setProjectWebsite((projectRow as { website?: string | null } | null)?.website ?? null)
+      const project = projectRow as { website?: string | null; brand_voice?: Record<string, unknown> | null } | null
+      setProjectWebsite(project?.website ?? null)
+      setProjectBrandVoice(project?.brand_voice ?? null)
     }
 
     if (assetsRes.ok) {
@@ -161,6 +166,7 @@ export default function CampaignDetailPage() {
   const insights = (meta as { insights?: unknown }).insights
   const campaignPersona = readCampaignPersona(meta)
   const personaLearning = readPersonaLearning(meta)
+  const personaTimeline = personaLearningTimeline(projectBrandVoice, campaignPersona?.id ?? personaLearning?.personaId)
   const manualTracker = readManualWorklog(meta)
 
   return (
@@ -227,7 +233,7 @@ export default function CampaignDetailPage() {
         <LaunchScheduleStrip assets={boardAssets} />
       </div>
 
-      <PersonaLearningCard persona={campaignPersona} learning={personaLearning} />
+      <PersonaLearningCard persona={campaignPersona} learning={personaLearning} timeline={personaTimeline} />
 
       {manualTracker && <ManualTrackerCard campaignId={campaign.id} tracker={manualTracker} onUpdated={loadAll} />}
 
@@ -451,7 +457,15 @@ function ManualTrackerCard({
   )
 }
 
-function PersonaLearningCard({ persona, learning }: { persona: CampaignPersonaMeta | null; learning: PersonaLearningMeta | null }) {
+function PersonaLearningCard({
+  persona,
+  learning,
+  timeline,
+}: {
+  persona: CampaignPersonaMeta | null
+  learning: PersonaLearningMeta | null
+  timeline: PersonaLearningTimelineEntry[]
+}) {
   return (
     <SectionPanel
       className="mb-4 border-emerald-500/25"
@@ -482,6 +496,47 @@ function PersonaLearningCard({ persona, learning }: { persona: CampaignPersonaMe
             {learning?.insightSignal ?? 'No persona-specific insight captured yet. Re-launch after metrics or review to build this memory.'}
           </p>
         </div>
+      </div>
+      <div className="mt-4 border-t border-slate-800 pt-4">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <History className="h-3.5 w-3.5 text-cyan-300" />
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Learning timeline</span>
+          <StatusPill tone={timeline.length > 0 ? 'info' : 'neutral'}>{timeline.length} recorded run{timeline.length === 1 ? '' : 's'}</StatusPill>
+        </div>
+        {timeline.length === 0 ? (
+          <p className="text-xs leading-5 text-slate-500">
+            No persona history yet. Refresh campaign learnings after logging metrics or completing manual worklog tasks.
+          </p>
+        ) : (
+          <ol className="space-y-2">
+            {timeline.map((entry, index) => (
+              <li key={`${entry.campaignId}:${entry.updatedAt}`} className="grid gap-2 rounded-md border border-slate-800 bg-slate-950/45 p-3 md:grid-cols-[7rem_minmax(0,1fr)_auto]">
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    {index === 0 ? 'Latest' : `Run ${timeline.length - index}`}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-300">{new Date(entry.updatedAt).toLocaleDateString()}</div>
+                </div>
+                <div className="min-w-0">
+                  <p className="line-clamp-2 text-xs leading-5 text-slate-200">
+                    {entry.insightSignal ?? entry.recommendedNext[0] ?? 'Learning captured without a clear signal.'}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {entry.bestChannel && <StatusPill tone="success"><TrendingUp className="h-3 w-3" /> {entry.bestChannel}</StatusPill>}
+                    {entry.worstChannel && <StatusPill tone="warn"><TrendingDown className="h-3 w-3" /> {entry.worstChannel}</StatusPill>}
+                    {entry.manualTaskCount > 0 && <StatusPill tone="neutral">{entry.manualTaskCount} manual task{entry.manualTaskCount === 1 ? '' : 's'}</StatusPill>}
+                  </div>
+                </div>
+                <Link
+                  href={`/campaigns/${entry.campaignId}`}
+                  className="inline-flex items-center self-start text-[10px] font-semibold uppercase tracking-wider text-emerald-300 hover:text-emerald-200"
+                >
+                  Open run
+                </Link>
+              </li>
+            ))}
+          </ol>
+        )}
       </div>
     </SectionPanel>
   )
