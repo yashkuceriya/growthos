@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildLaunchExecutionBrief, buildLaunchExecutionChecklist, buildLaunchPlan, isLaunchChannel, LAUNCH_CHANNELS } from './plan'
+import { buildLaunchExecutionBrief, buildLaunchExecutionChecklist, buildLaunchPersonaImpact, buildLaunchPlan, isLaunchChannel, LAUNCH_CHANNELS } from './plan'
 import type { MarketingMemory } from '@/lib/marketing/memory'
 import type { MarketingPersona } from '@/lib/marketing/personas'
 
@@ -383,6 +383,57 @@ describe('buildLaunchPlan', () => {
     expect(checklist.some((task) => task.id === 'persona-learning-evidence')).toBe(true)
     expect(checklist.find((task) => task.id === 'channel-email')?.detail).toMatch(/learned best channel/i)
     expect(checklist.find((task) => task.id === 'channel-linkedin')?.detail).toMatch(/underperformed/i)
+  })
+
+  it('summarizes how persona learning changed the launch plan', () => {
+    const plan = buildLaunchPlan({
+      memory: makeMemory({
+        blueprint: {
+          ...makeMemory().blueprint,
+          vertical: 'b2b_saas',
+        },
+      }),
+      personaLearning: {
+        personaId: 'persona-founder',
+        personaName: 'Founder Operator',
+        campaignId: 'camp_1',
+        updatedAt: '2026-06-15T01:00:00.000Z',
+        insightSignal: 'Proof-led email got qualified replies.',
+        bestChannel: 'email',
+        worstChannel: 'linkedin',
+        manualTaskCount: 2,
+        recommendedNext: ['Repeat email with a sharper proof point'],
+        historyCount: 3,
+      },
+    })
+
+    const impact = buildLaunchPersonaImpact(plan, {
+      personaId: 'persona-founder',
+      personaName: 'Founder Operator',
+      campaignId: 'camp_1',
+      updatedAt: '2026-06-15T01:00:00.000Z',
+      insightSignal: 'Proof-led email got qualified replies.',
+      bestChannel: 'email',
+      worstChannel: 'linkedin',
+      manualTaskCount: 2,
+      recommendedNext: ['Repeat email with a sharper proof point'],
+      historyCount: 3,
+    })
+
+    expect(impact?.summary).toContain('favor email lifecycle')
+    expect(impact?.summary).toContain('rework LinkedIn')
+    expect(impact?.nextTest).toBe('Repeat email with a sharper proof point')
+    expect(impact?.evidence).toContain('Proof-led email got qualified replies.')
+    expect(impact?.channels).toEqual([
+      expect.objectContaining({ channel: 'email', intent: 'favor', defaultOn: true }),
+      expect.objectContaining({ channel: 'linkedin', intent: 'rework', defaultOn: true }),
+    ])
+  })
+
+  it('returns no persona impact when no learning exists', () => {
+    const plan = buildLaunchPlan({ memory: makeMemory() })
+
+    expect(buildLaunchPersonaImpact(plan, null)).toBeNull()
   })
 
   it('builds manual execution tasks and metrics for selected channels', () => {

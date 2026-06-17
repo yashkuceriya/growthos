@@ -20,7 +20,7 @@ import { QualityVerdict } from '@/components/marketing/quality-verdict'
 import type { GeneratedQualityScore } from '@/lib/marketing/quality'
 import type { MarketingPersona } from '@/lib/marketing/personas'
 import { buildPersonaExperimentBoard, type PersonaExperimentRow, type PersonaLearningDigest } from '@/lib/marketing/persona-learning'
-import { buildLaunchExecutionBrief, buildLaunchExecutionChecklist } from '@/lib/launch/plan'
+import { buildLaunchExecutionBrief, buildLaunchExecutionChecklist, buildLaunchPersonaImpact, type LaunchPersonaPlanImpact } from '@/lib/launch/plan'
 
 type ChannelKey = 'meta' | 'linkedin' | 'tiktok' | 'twitter' | 'reddit' | 'email' | 'blog' | 'landing'
 type ChannelStatus = 'pending' | 'generating' | 'ready' | 'failed'
@@ -1216,6 +1216,7 @@ function PlanPreview({
     angle,
     personaLearning,
   })
+  const personaImpact = buildLaunchPersonaImpact(plan, personaLearning)
   const completedTaskCount = checklist.filter((task) => doneTaskIds.has(task.id)).length
   const copyLocalBrief = () => {
     onCopyBrief(buildLaunchExecutionBrief({
@@ -1301,6 +1302,7 @@ function PlanPreview({
           <StrategyNote label="Channel logic" text={plan.strategy.channelRationale} />
           <StrategyNote label="Learning loop" text={plan.strategy.learningObjective} />
         </div>
+        {personaImpact && <PersonaImpactPanel impact={personaImpact} />}
         <p className="mt-3 text-xs leading-5 text-amber-200">{plan.strategy.risk}</p>
       </div>
 
@@ -1538,6 +1540,41 @@ function StrategyNote({ label, text }: { label: string; text: string }) {
     <div className="min-w-0">
       <div className="mb-1 font-mono-data text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
       <p className="text-[11px] leading-5 text-slate-300">{text}</p>
+    </div>
+  )
+}
+
+function PersonaImpactPanel({ impact }: { impact: LaunchPersonaPlanImpact }) {
+  return (
+    <div className="mt-4 rounded-md border border-cyan-500/25 bg-cyan-500/5 p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <Brain className="h-3.5 w-3.5 text-cyan-300" />
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-cyan-200">Persona impact</span>
+        <StatusPill tone="info">{impact.personaName}</StatusPill>
+      </div>
+      <p className="text-xs leading-5 text-slate-200">{impact.summary}</p>
+      <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
+        {impact.channels.slice(0, 2).map((channel) => (
+          <div key={`${channel.intent}-${channel.channel}`} className="rounded border border-slate-800 bg-slate-950/55 p-2">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{channel.intent === 'favor' ? 'Favor' : 'Rework'}</span>
+              <StatusPill tone={channel.intent === 'favor' ? 'success' : 'warn'}>{channel.tier}</StatusPill>
+            </div>
+            <p className="line-clamp-3 text-xs leading-5 text-slate-300">{channel.detail}</p>
+          </div>
+        ))}
+        <div className="rounded border border-slate-800 bg-slate-950/55 p-2">
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Next test</div>
+          <p className="line-clamp-3 text-xs leading-5 text-slate-300">
+            {impact.nextTest ?? impact.evidence[0] ?? 'Run a narrow persona-specific test and log results after launch.'}
+          </p>
+        </div>
+      </div>
+      {impact.evidence.length > 0 && (
+        <p className="mt-2 line-clamp-2 text-[11px] leading-5 text-slate-400">
+          Evidence: {impact.evidence.join(' | ')}
+        </p>
+      )}
     </div>
   )
 }

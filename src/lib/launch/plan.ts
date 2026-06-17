@@ -86,6 +86,23 @@ export interface LaunchPlan {
   source: 'classification' | 'fallback'
 }
 
+export interface LaunchPersonaChannelImpact {
+  channel: LaunchChannel
+  label: string
+  tier: LaunchChannelRecommendation['tier']
+  defaultOn: boolean
+  intent: 'favor' | 'rework'
+  detail: string
+}
+
+export interface LaunchPersonaPlanImpact {
+  personaName: string
+  summary: string
+  evidence: string[]
+  nextTest: string | null
+  channels: LaunchPersonaChannelImpact[]
+}
+
 export interface BuildLaunchPlanArgs {
   memory: MarketingMemory
   persona?: MarketingPersona | null
@@ -333,6 +350,73 @@ export function buildLaunchExecutionChecklist({
   })
 
   return tasks
+}
+
+export function buildLaunchPersonaImpact(
+  plan: LaunchPlan,
+  personaLearning: PersonaLearningDigest | null | undefined,
+): LaunchPersonaPlanImpact | null {
+  if (!personaLearning) return null
+  const personaName = personaLearning.personaName ?? 'this persona'
+  const channels: LaunchPersonaChannelImpact[] = []
+  const best = personaLearning.bestChannel ? normalizeChannelAlias(personaLearning.bestChannel) : null
+  const worst = personaLearning.worstChannel ? normalizeChannelAlias(personaLearning.worstChannel) : null
+
+  if (best) {
+    const rec = plan.channels.find((item) => item.channel === best)
+    if (rec) {
+      channels.push({
+        channel: best,
+        label: channelLabel(best),
+        tier: rec.tier,
+        defaultOn: rec.defaultOn,
+        intent: 'favor',
+        detail: rec.defaultOn
+          ? `${channelLabel(best)} is selected because recent persona evidence supports it.`
+          : `${channelLabel(best)} has evidence, but it is not selected yet. Consider enabling it before launch.`,
+      })
+    }
+  }
+
+  if (worst && worst !== best) {
+    const rec = plan.channels.find((item) => item.channel === worst)
+    if (rec) {
+      channels.push({
+        channel: worst,
+        label: channelLabel(worst),
+        tier: rec.tier,
+        defaultOn: rec.defaultOn,
+        intent: 'rework',
+        detail: rec.defaultOn
+          ? `${channelLabel(worst)} remains selected, but prior evidence says to change the angle or keep the test small.`
+          : `${channelLabel(worst)} is held out because prior persona evidence underperformed.`,
+      })
+    }
+  }
+
+  const evidence = [
+    personaLearning.insightSignal,
+    personaLearning.bestChannel ? `Best channel: ${personaLearning.bestChannel}` : null,
+    personaLearning.worstChannel ? `Rework or avoid: ${personaLearning.worstChannel}` : null,
+  ].filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+
+  if (channels.length === 0 && evidence.length === 0 && personaLearning.recommendedNext.length === 0) return null
+
+  const favored = channels.find((channel) => channel.intent === 'favor')?.label
+  const rework = channels.find((channel) => channel.intent === 'rework')?.label
+  const summaryParts = [
+    favored ? `favor ${favored}` : null,
+    rework ? `rework ${rework}` : null,
+  ].filter((part): part is string => !!part)
+  return {
+    personaName,
+    summary: summaryParts.length
+      ? `GrowthOS is using ${personaName} learning to ${summaryParts.join(' and ')}.`
+      : `GrowthOS found persona learning for ${personaName}; use it to keep the launch test narrow.`,
+    evidence: evidence.slice(0, 3),
+    nextTest: personaLearning.recommendedNext[0] ?? null,
+    channels,
+  }
 }
 
 function personaLearningBriefBlock(personaLearning: PersonaLearningDigest | null | undefined): string[] {
