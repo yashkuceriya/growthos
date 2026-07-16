@@ -17,7 +17,7 @@ import { createClient } from '@supabase/supabase-js'
 import { config } from 'dotenv'
 import { createHash, randomBytes } from 'crypto'
 
-config({ path: '.env.local' })
+config({ path: '.env.local', quiet: true })
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
 const SB_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -45,6 +45,21 @@ function bad(msg: string) {
 }
 function section(title: string) {
   console.log(`\n=== ${title} ===`)
+}
+
+async function checkSupabaseReachability(): Promise<boolean> {
+  section('Supabase endpoint')
+  try {
+    const res = await fetch(`${SB_URL}/auth/v1/health`)
+    if (res.ok) {
+      ok(`auth endpoint reachable (${res.status})`)
+      return true
+    }
+    bad(`auth endpoint returned ${res.status} — verify NEXT_PUBLIC_SUPABASE_URL and project status`)
+  } catch (error) {
+    bad(`auth endpoint unreachable: ${error instanceof Error ? error.message : String(error)} — verify NEXT_PUBLIC_SUPABASE_URL and project status`)
+  }
+  return false
 }
 
 // ── DB: tables + RPCs + schema cache ───────────────────────────────
@@ -101,8 +116,8 @@ async function checkStorage() {
 // ── Env vars (decision matrix, not pass/fail) ──────────────────────
 function checkEnv() {
   section('Env-var configuration (info)')
-  const required = ['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'OPENROUTER_API_KEY']
-  const optional = ['ANTHROPIC_API_KEY', 'CRON_SECRET', 'RESEND_API_KEY', 'RESEND_FROM_EMAIL', 'SCREENSHOTONE_ACCESS_KEY', 'SOCIAL_TOKEN_ENC_KEY', 'FAL_KEY', 'OPENAI_API_KEY', 'XAI_API_KEY']
+  const required = ['NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY']
+  const optional = ['OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY', 'CRON_SECRET', 'RESEND_API_KEY', 'RESEND_FROM_EMAIL', 'SCREENSHOTONE_ACCESS_KEY', 'SOCIAL_TOKEN_ENC_KEY', 'FAL_KEY', 'OPENAI_API_KEY', 'XAI_API_KEY']
   for (const k of required) {
     if (process.env[k]) ok(`required ${k}: set`)
     else bad(`required ${k}: MISSING`)
@@ -223,10 +238,15 @@ async function checkWebhookSigning() {
 async function main() {
   console.log(`Smoke test against ${APP_URL}\n`)
   checkEnv()
-  await checkDb()
-  await checkStorage()
+  const supabaseReachable = await checkSupabaseReachability()
+  if (supabaseReachable) {
+    await checkDb()
+    await checkStorage()
+  } else {
+    console.log('\n· Skipping database, storage, and API-key flow checks until Supabase is reachable.')
+  }
   await checkHttp()
-  await checkApiKeyFlows()
+  if (supabaseReachable) await checkApiKeyFlows()
   await checkWebhookSigning()
   console.log(`\n${pass} passed, ${fail} failed`)
   if (fail > 0) {

@@ -84,7 +84,7 @@ function ServiceFlowPanel({ integrations }: { integrations: IntegrationHealth[] 
   const localBlockers = countLocalBlockers(integrations)
   const providerCount = countConfiguredProviderServices(integrations)
   const openRouter = integrations.find((i) => i.name === 'OpenRouter')
-  const deliveryReady = integrations.some((i) => i.category === 'delivery' && i.configured)
+  const deliveryReady = integrations.some((i) => ['Resend', 'Social tokens'].includes(i.name) && i.configured)
   const localReady = localBlockers === 0
 
   const steps = [
@@ -915,7 +915,7 @@ export default function SettingsPage() {
                       i.status === 'error' ? 'error' :
                       'neutral'
                     const label =
-                      i.status === 'ok' ? 'OK' :
+                      i.status === 'ok' ? i.category === 'foundation' ? 'OK' : 'Configured' :
                       i.status === 'warn' ? 'Action needed' :
                       i.status === 'error' ? 'Required' :
                       i.configured ? 'Configured' : 'Not configured'

@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js'
 import { config } from 'dotenv'
 import { LOCAL_DEV_EMAIL, LOCAL_DEV_PASSWORD } from '../src/lib/local-dev-auth'
 
-config({ path: '.env.local' })
+config({ path: '.env.local', quiet: true })
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
 const SB_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -36,6 +36,20 @@ async function expectHttp(path: string, expectedStatus: number, label: string) {
   }
 }
 
+async function supabaseReachable(): Promise<boolean> {
+  try {
+    const res = await fetch(`${SB_URL}/auth/v1/health`)
+    if (res.ok) {
+      ok(`Supabase auth endpoint reachable (${res.status})`)
+      return true
+    }
+    bad(`Supabase auth endpoint returned ${res.status}; verify NEXT_PUBLIC_SUPABASE_URL and project status`)
+  } catch (error) {
+    bad(`Supabase auth endpoint unreachable: ${error instanceof Error ? error.message : String(error)}; verify NEXT_PUBLIC_SUPABASE_URL and project status`)
+  }
+  return false
+}
+
 async function main() {
   console.log(`\nGrowthOS local product smoke against ${APP_URL}\n`)
 
@@ -48,6 +62,11 @@ async function main() {
   await expectHttp('/login', 200, 'login page reachable')
   await expectHttp('/dashboard', 307, 'dashboard redirects when signed out')
   await expectHttp('/api/dashboard/health', 401, 'dashboard health rejects anonymous')
+
+  if (!await supabaseReachable()) {
+    finish()
+    return
+  }
 
   const supabase = createClient(SB_URL, SB_ANON)
   const service = createClient(SB_URL, SB_SERVICE)

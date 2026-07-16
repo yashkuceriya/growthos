@@ -9,7 +9,8 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { wrapHandler } from '@/lib/api-error'
-import { computeServiceIntegrations } from '@/lib/services/service-readiness'
+import { hasLocalDevSessionCookie } from '@/lib/local-dev-auth'
+import { computeFallbackServiceIntegrations, computeServiceIntegrations } from '@/lib/services/service-readiness'
 
 export interface DashboardActivity {
   id: string
@@ -40,6 +41,16 @@ export interface SetupChecklistState {
 }
 
 async function handleGet(request: Request) {
+  if (hasLocalDevSessionCookie(request.headers.get('cookie'))) {
+    return Response.json({
+      integrations: computeFallbackServiceIntegrations(process.env),
+      activity: [],
+      kpi: emptyStats(),
+      setup: null,
+      localFallback: true,
+    })
+  }
+
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
@@ -120,6 +131,20 @@ async function handleGet(request: Request) {
   }
 
   return Response.json({ integrations, activity, kpi, setup })
+}
+
+function emptyStats(): Stats {
+  return {
+    activeCampaigns: 0,
+    adsGenerated: 0,
+    leads: 0,
+    totalSpend: 0,
+    leadsThisWeek: 0,
+    webhookSuccessRate: null,
+    recentIngestStatus: 'unknown',
+    spendDaily: Array.from({ length: 14 }, () => 0),
+    leadsDaily: Array.from({ length: 14 }, () => 0),
+  }
 }
 
 /**

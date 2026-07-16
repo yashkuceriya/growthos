@@ -26,7 +26,7 @@ export interface ServiceDefinition {
 export type EnvLike = Record<string, string | undefined>
 
 function has(env: EnvLike, key: string): boolean {
-  return !!env[key]
+  return !!env[key]?.trim()
 }
 
 export const SERVICE_DEFINITIONS: ServiceDefinition[] = [
@@ -37,7 +37,7 @@ export const SERVICE_DEFINITIONS: ServiceDefinition[] = [
     requiredForLocal: true,
     unlocks: 'Database, auth, projects, campaigns, learnings, storage-backed app state',
     localFallback: 'None. This is the local app foundation.',
-    configured: (env) => has(env, 'NEXT_PUBLIC_SUPABASE_URL') && has(env, 'SUPABASE_SERVICE_ROLE_KEY'),
+    configured: (env) => has(env, 'NEXT_PUBLIC_SUPABASE_URL') && has(env, 'NEXT_PUBLIC_SUPABASE_ANON_KEY') && has(env, 'SUPABASE_SERVICE_ROLE_KEY'),
     detail: (configured) => configured ? 'Database + auth + storage ready' : 'Set Supabase URL, anon key, and service role key',
   },
   {
@@ -68,7 +68,12 @@ export const SERVICE_DEFINITIONS: ServiceDefinition[] = [
     unlocks: 'Outbound email sends, sequence ticks, delivery events, and reply/bounce webhooks',
     localFallback: 'Email copy, sequences, winners, and daily summaries can be planned without sending.',
     configured: (env) => has(env, 'RESEND_API_KEY') && has(env, 'RESEND_FROM_EMAIL'),
-    detail: (configured) => configured ? 'Email send + webhooks live' : 'Optional; email planning still works without sending',
+    detail: (configured, env) => {
+      if (!configured) return 'Optional; email planning still works without sending'
+      return has(env, 'RESEND_WEBHOOK_SECRET')
+        ? 'Email sending + verified webhooks live'
+        : 'Email sending ready; set RESEND_WEBHOOK_SECRET for verified delivery events'
+    },
   },
   {
     name: 'ScreenshotOne',
@@ -107,7 +112,7 @@ export const SERVICE_DEFINITIONS: ServiceDefinition[] = [
     unlocks: 'Encrypted X / LinkedIn token storage and scheduled publishing',
     localFallback: 'Social posts can be generated, scored, queued conceptually, and exported for manual publishing.',
     configured: (env) => has(env, 'SOCIAL_TOKEN_ENC_KEY'),
-    detail: (configured) => configured ? 'Encryption key set; tokens stored AES-256-GCM' : 'Optional until live social publishing is needed',
+    detail: (configured) => configured ? 'Token encryption ready; connect platform accounts to publish' : 'Optional until live social publishing is needed',
   },
   {
     name: 'Webhook outbox',
@@ -118,6 +123,37 @@ export const SERVICE_DEFINITIONS: ServiceDefinition[] = [
     localFallback: 'Manual tests and local route calls still work; background automation waits for CRON_SECRET.',
     configured: (env) => has(env, 'CRON_SECRET'),
     detail: (configured) => configured ? 'Cron drainer authenticated' : 'Optional until scheduled automation is needed',
+  },
+  {
+    name: 'Signed lead capture',
+    category: 'delivery',
+    envVars: ['LEAD_CAPTURE_SIGNING_SECRET', 'LEAD_CAPTURE_REQUIRE_TOKEN'],
+    requiredForLocal: false,
+    unlocks: 'Signed public lead submissions and rejection of forged capture requests',
+    localFallback: 'Session workflows and local forms work without signed public capture tokens.',
+    configured: (env) => has(env, 'LEAD_CAPTURE_SIGNING_SECRET'),
+    detail: (configured, env) => {
+      if (!configured) return env.LEAD_CAPTURE_REQUIRE_TOKEN === 'true'
+        ? 'LEAD_CAPTURE_REQUIRE_TOKEN is true but LEAD_CAPTURE_SIGNING_SECRET is missing'
+        : 'Optional until public lead forms require signed tokens'
+      return env.LEAD_CAPTURE_REQUIRE_TOKEN === 'true'
+        ? 'Signed capture tokens required'
+        : 'Signing secret ready; token enforcement is optional'
+    },
+  },
+  {
+    name: 'Upstash rate limiting',
+    category: 'automation',
+    envVars: ['UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN'],
+    requiredForLocal: false,
+    unlocks: 'Shared rate limits across multiple app processes or deployments',
+    localFallback: 'The local app uses its in-process limiter; API keys use the Supabase token-bucket RPC.',
+    configured: (env) => has(env, 'UPSTASH_REDIS_REST_URL') && has(env, 'UPSTASH_REDIS_REST_TOKEN'),
+    detail: (configured, env) => {
+      if (configured) return 'Shared Redis rate limiting ready'
+      if (has(env, 'UPSTASH_REDIS_REST_URL') || has(env, 'UPSTASH_REDIS_REST_TOKEN')) return 'Set both Upstash URL and token'
+      return 'Optional for local/single-process use'
+    },
   },
 ]
 
@@ -143,6 +179,28 @@ export function computeServiceIntegrations(env: EnvLike, hasRecentAiCalls = fals
       unlocks: service.unlocks,
     }
   })
+}
+
+export function computeFallbackServiceIntegrations(env: EnvLike): IntegrationHealth[] {
+  const integrations = computeServiceIntegrations(env).map((integration) => integration.name === 'Supabase'
+    ? {
+        ...integration,
+        configured: false,
+        status: 'error' as const,
+        detail: 'Configured endpoint is unavailable or unverified; development fallback shell is active',
+      }
+    : integration)
+  integrations.push({
+    name: 'Database functions',
+    configured: false,
+    status: 'warn',
+    detail: 'Not checked while Supabase is unavailable',
+    category: 'foundation',
+    envVars: [],
+    localFallback: 'Restore Supabase connectivity, then rerun the live smoke test.',
+    unlocks: 'Budget caps, rate limits, and atomic brand-voice merges',
+  })
+  return integrations
 }
 
 export function countLocalBlockers(integrations: IntegrationHealth[]): number {

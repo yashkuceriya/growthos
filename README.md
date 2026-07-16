@@ -6,8 +6,9 @@ not as a packaged SaaS product.
 
 ## Local Setup
 
-Install dependencies, copy the env template, and fill in the Supabase/OpenRouter
-values you actually use locally:
+Install dependencies, copy the env template, and fill in the three Supabase
+values. Provider keys are optional and can be added as each live capability is
+needed:
 
 ```bash
 npm install
@@ -36,8 +37,8 @@ Open [http://localhost:3000](http://localhost:3000) with your browser.
 - `src/proxy.ts` refreshes Supabase auth cookies before route rendering. If auth
   starts behaving strangely, run `npm run doctor` first.
 - Supabase migrations live in `supabase/migrations`. If a restore only brings
-  back core product tables, rerun/paste `027_restore_api_surface.sql`; it
-  recreates the API key, webhook, queue, idempotency, and rate-limit surface.
+  back core product tables, apply migrations `027` through `029`; they restore
+  the API surface, asset quality metadata, and persona intelligence.
 - The local admin is `local@growthos.dev` / `GrowthOS-local-2026!`. In
   development only, the login page can also unlock a fallback local workspace if
   Supabase auth is unavailable.

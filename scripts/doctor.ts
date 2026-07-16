@@ -4,7 +4,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { config } from 'dotenv'
 
-config({ path: '.env.local' })
+config({ path: '.env.local', quiet: true })
 
 type Check = {
   name: string
@@ -22,10 +22,10 @@ const requiredEnv = [
   'NEXT_PUBLIC_SUPABASE_URL',
   'NEXT_PUBLIC_SUPABASE_ANON_KEY',
   'SUPABASE_SERVICE_ROLE_KEY',
-  'OPENROUTER_API_KEY',
 ]
 
 const optionalEnv = [
+  'OPENROUTER_API_KEY',
   'ANTHROPIC_API_KEY',
   'CRON_SECRET',
   'RESEND_API_KEY',
@@ -97,11 +97,19 @@ const migrationsDir = join(root, 'supabase/migrations')
 const migrations = existsSync(migrationsDir)
   ? readdirSync(migrationsDir).filter((file) => file.endsWith('.sql')).sort()
   : []
+const requiredMigrations = [
+  '027_restore_api_surface.sql',
+  '028_asset_quality_metadata.sql',
+  '029_persona_intelligence.sql',
+]
+const missingMigrations = requiredMigrations.filter((file) => !migrations.includes(file))
 
 checks.push({
   name: 'Supabase migrations',
-  ok: migrations.length >= 27 && (migrations.at(-1)?.startsWith('027_') ?? false),
-  detail: `${migrations.length} migration files found${migrations.at(-1) ? `, latest ${migrations.at(-1)}` : ''}`,
+  ok: migrations.length >= 29 && missingMigrations.length === 0,
+  detail: missingMigrations.length > 0
+    ? `${migrations.length} migration files found; missing ${missingMigrations.join(', ')}`
+    : `${migrations.length} migration files found, latest ${migrations.at(-1) ?? 'none'}`,
   required: true,
 })
 
