@@ -181,7 +181,12 @@ export default function AgencyHomePage() {
           </div>
           {Array.isArray(sprint.experiments_to_run) && (sprint.experiments_to_run as Array<Record<string, unknown>>).length > 0 && (
             <div>
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Experiments This Week</span>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Experiments This Week</span>
+                <Link href="/agency/experiments" className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-300 hover:text-emerald-200">
+                  Open command center <ArrowRight className="h-3 w-3" />
+                </Link>
+              </div>
               <ul className="mt-2 space-y-2">
                 {(sprint.experiments_to_run as Array<Record<string, unknown>>).map((e, i) => (
                   <li key={i} className="rounded-md border border-slate-800 bg-slate-800/40 p-3">

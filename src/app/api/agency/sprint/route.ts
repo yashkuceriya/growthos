@@ -23,10 +23,17 @@ const SprintPlanSchema = z.object({
   })).min(12).max(25),
   experiments_to_run: z.array(z.object({
     name: z.string(),
-    hypothesis: z.string(),
-    variant_a: z.string(),
-    variant_b: z.string(),
-    duration_days: z.number(),
+    hypothesis: z.string().describe('Specific falsifiable claim tied to the audience and business goal'),
+    variable: z.string().describe('The single factor changed between control and treatment'),
+    variant_a: z.string().describe('Control condition'),
+    variant_b: z.string().describe('Treatment condition; only the named variable may differ'),
+    primary_metric: z.string().describe('The one metric that decides the winner'),
+    guardrail_metric: z.string().describe('Metric that must not materially worsen'),
+    target_improvement_pct: z.number().min(1).max(100).describe('Minimum relative improvement worth adopting'),
+    duration_days: z.number().int().min(7).max(42),
+    minimum_sample_per_variant: z.number().int().min(50).describe('Planning floor, not a claim of statistical power'),
+    decision_rule: z.string().describe('Precommitted promote, iterate, or stop rule'),
+    channel: z.string(),
   })).length(2),
   check_ins: z.array(z.object({
     day: z.string(),
@@ -55,7 +62,9 @@ async function handlePost(request: Request) {
   const res = await generateObject({
     model: modelFor('strategic'),
     schema: SprintPlanSchema,
-    system: `You are a Director of Marketing running an agile weekly sprint for a lean founder-led team. Produce a concrete, time-blocked sprint plan with 12-20 deliverables spread across the week. Mix high-effort flagship pieces with quick daily wins. Respect real posting-time best practices per platform.`,
+    system: `You are a Director of Marketing running an agile weekly sprint for a lean founder-led team. Produce a concrete, time-blocked sprint plan with 12-20 deliverables spread across the week. Mix high-effort flagship pieces with quick daily wins. Respect real posting-time best practices per platform.
+
+For each experiment, create a decision contract before proposing execution. Change exactly one variable between control and treatment. Select one primary metric, one guardrail metric, a minimum worthwhile relative lift, a realistic duration, a conservative sample planning floor, and an explicit promote/iterate/stop rule. Do not claim statistical significance or certainty before results exist.`,
     messages: [{ role: 'user', content: `PRODUCT: ${project.name}
 VALUE PROP: ${bv.value_proposition ?? project.description ?? ''}
 AUDIENCE: ${bv.target_audience ?? ''}
