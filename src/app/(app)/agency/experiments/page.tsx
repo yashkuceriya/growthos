@@ -4,12 +4,16 @@ import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowRight,
+  Archive,
   CheckCircle2,
   ClipboardCopy,
   FlaskConical,
   History,
   Loader2,
+  Play,
   RefreshCw,
+  Save,
+  SearchCheck,
   Sparkles,
   TriangleAlert,
 } from 'lucide-react'
@@ -24,6 +28,12 @@ import {
   type ExperimentReadiness,
   type MarketingExperiment,
 } from '@/lib/marketing/experiments'
+import {
+  computeExperimentEvidence,
+  type ExperimentActionInput,
+  type ExperimentDecision,
+  type ExperimentLedgerRow,
+} from '@/lib/marketing/experiment-ledger'
 import { PageShell } from '@/components/ui/page-shell'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionPanel } from '@/components/ui/section-panel'
@@ -42,22 +52,28 @@ export default function ExperimentsPage() {
   const supabase = useMemo(() => createClient(), [])
   const [brandVoice, setBrandVoice] = useState<Record<string, unknown>>({})
   const [campaigns, setCampaigns] = useState<CampaignSignal[]>([])
+  const [ledger, setLedger] = useState<ExperimentLedgerRow[]>([])
+  const [ledgerError, setLedgerError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
+  const [mutatingId, setMutatingId] = useState<string | null>(null)
+  const [outcomeId, setOutcomeId] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     if (!activeProject) return
     setLoading(true)
+    setLedgerError(null)
     const localBrandVoice = object(activeProject.brand_voice)
     setBrandVoice(localBrandVoice)
     if (activeProject.id === LOCAL_DEV_PROJECT_ID) {
       setCampaigns([])
+      setLedger([])
       setLoading(false)
       return
     }
 
     try {
-      const [projectResult, campaignResult] = await Promise.all([
+      const [projectResult, campaignResult, ledgerResponse] = await Promise.all([
         supabase.from('projects').select('brand_voice').eq('id', activeProject.id).maybeSingle(),
         supabase
           .from('campaigns')
@@ -65,9 +81,17 @@ export default function ExperimentsPage() {
           .eq('project_id', activeProject.id)
           .order('updated_at', { ascending: false })
           .limit(6),
+        fetch(`/api/experiments?project_id=${encodeURIComponent(activeProject.id)}`),
       ])
       if (projectResult.data?.brand_voice) setBrandVoice(object(projectResult.data.brand_voice))
       if (campaignResult.data) setCampaigns(campaignResult.data as CampaignSignal[])
+      if (ledgerResponse.ok) {
+        const payload = await ledgerResponse.json() as { experiments?: ExperimentLedgerRow[] }
+        setLedger(payload.experiments ?? [])
+      } else {
+        const payload = await ledgerResponse.json().catch(() => ({})) as { error?: string }
+        setLedgerError(payload.error ?? 'The evidence ledger could not be loaded.')
+      }
     } finally {
       setLoading(false)
     }
@@ -83,6 +107,8 @@ export default function ExperimentsPage() {
   const summary = useMemo(() => summarizeExperimentPortfolio(experiments), [experiments])
   const northStar = text(sprint.north_star)
   const sprintTheme = text(sprint.sprint_theme)
+  const sprintWeek = text(sprint.week_start) ?? 'current'
+  const savedSourceKeys = useMemo(() => new Set(ledger.map((item) => item.sourceKey)), [ledger])
 
   async function generateSprint() {
     if (!activeProject) return
@@ -112,6 +138,62 @@ export default function ExperimentsPage() {
     })
     await navigator.clipboard.writeText(brief)
     toast.success('Experiment brief copied')
+  }
+
+  async function saveExperiment(experiment: MarketingExperiment) {
+    if (!activeProject || experiment.readiness !== 'ready') return
+    setMutatingId(experiment.id)
+    try {
+      const response = await fetch('/api/experiments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: activeProject.id,
+          name: experiment.name,
+          hypothesis: experiment.hypothesis,
+          variable: experiment.variable,
+          control: experiment.control,
+          treatment: experiment.treatment,
+          primaryMetric: experiment.primaryMetric,
+          guardrailMetric: experiment.guardrailMetric,
+          targetImprovementPct: experiment.targetImprovementPct,
+          plannedDurationDays: experiment.durationDays,
+          minimumSamplePerVariant: experiment.minimumSamplePerVariant,
+          decisionRule: experiment.decisionRule,
+          channel: experiment.channel,
+          source: 'sprint',
+          sourceKey: `${sprintWeek}:${experiment.id}`,
+        }),
+      })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error ?? 'Could not save experiment')
+      toast.success(payload.created ? 'Experiment committed to the ledger' : 'Experiment already in the ledger')
+      await refresh()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not save experiment')
+    } finally {
+      setMutatingId(null)
+    }
+  }
+
+  async function updateExperiment(id: string, action: ExperimentActionInput) {
+    setMutatingId(id)
+    try {
+      const response = await fetch(`/api/experiments/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(action),
+      })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error ?? 'Could not update experiment')
+      setLedger((current) => current.map((item) => item.id === id ? payload.experiment : item))
+      setOutcomeId(null)
+      toast.success(action.action === 'decide' ? 'Outcome preserved' : `Experiment marked ${payload.experiment.status}`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not update experiment')
+    } finally {
+      setMutatingId(null)
+    }
   }
 
   if (!activeProject) {
@@ -151,7 +233,7 @@ export default function ExperimentsPage() {
         <Stat label="Sprint experiments" value={String(summary.total)} />
         <Stat label="Run-ready" value={String(summary.ready)} tone={summary.ready > 0 ? 'text-emerald-300' : undefined} />
         <Stat label="Average readiness" value={`${summary.averageScore}%`} />
-        <Stat label="Campaign evidence" value={String(campaigns.length)} />
+        <Stat label="Evidence ledger" value={String(ledger.length)} />
       </div>
 
       {experiments.length === 0 ? (
@@ -170,6 +252,9 @@ export default function ExperimentsPage() {
                   experiment={experiment}
                   rank={index + 1}
                   onCopy={() => void copyBrief(experiment)}
+                  onSave={() => void saveExperiment(experiment)}
+                  saved={savedSourceKeys.has(`${sprintWeek}:${experiment.id}`)}
+                  saving={mutatingId === experiment.id}
                 />
               ))}
             </div>
@@ -221,6 +306,37 @@ export default function ExperimentsPage() {
         </div>
       )}
 
+      <SectionPanel
+        className="mt-5"
+        title={<span className="flex items-center gap-2"><History className="h-3.5 w-3.5 text-cyan-300" />Durable evidence ledger</span>}
+        action={ledger.length ? <StatusPill tone="info">{ledger.filter((item) => item.status === 'decided').length} decided</StatusPill> : undefined}
+        contentClassName="p-0"
+      >
+        {ledgerError ? (
+          <div className="flex gap-2 px-4 py-5 text-xs leading-5 text-amber-200/80">
+            <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
+            <span>{ledgerError} Apply Supabase migration 030, then refresh this page.</span>
+          </div>
+        ) : ledger.length ? (
+          <div className="divide-y divide-slate-800">
+            {ledger.map((item) => (
+              <LedgerRow
+                key={item.id}
+                experiment={item}
+                busy={mutatingId === item.id}
+                recording={outcomeId === item.id}
+                onRecord={() => setOutcomeId((current) => current === item.id ? null : item.id)}
+                onAction={(action) => void updateExperiment(item.id, action)}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="px-4 py-6 text-xs leading-5 text-slate-500">
+            Save a run-ready sprint experiment to preserve its decision contract and begin collecting evidence.
+          </div>
+        )}
+      </SectionPanel>
+
       {experiments.length > 0 && (
         <div className="mt-5 flex flex-col justify-between gap-3 border-t border-slate-800 pt-4 sm:flex-row sm:items-center">
           <div>
@@ -237,10 +353,13 @@ export default function ExperimentsPage() {
   )
 }
 
-function ExperimentRow({ experiment, rank, onCopy }: {
+function ExperimentRow({ experiment, rank, onCopy, onSave, saved, saving }: {
   experiment: MarketingExperiment
   rank: number
   onCopy: () => void
+  onSave: () => void
+  saved: boolean
+  saving: boolean
 }) {
   const tone = readinessTone(experiment.readiness)
   return (
@@ -262,15 +381,28 @@ function ExperimentRow({ experiment, rank, onCopy }: {
             <p className="mt-2 text-xs leading-5 text-slate-300">{experiment.hypothesis || 'Hypothesis not defined.'}</p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onCopy}
-          title="Copy operator brief"
-          aria-label={`Copy ${experiment.name} operator brief`}
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center self-end rounded-md border border-slate-700 text-slate-400 hover:border-emerald-500/50 hover:text-emerald-300 lg:self-start"
-        >
-          <ClipboardCopy className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex shrink-0 gap-2 self-end lg:self-start">
+          <button
+            type="button"
+            onClick={onCopy}
+            title="Copy operator brief"
+            aria-label={`Copy ${experiment.name} operator brief`}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-700 text-slate-400 hover:border-emerald-500/50 hover:text-emerald-300"
+          >
+            <ClipboardCopy className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={saved || saving || experiment.readiness !== 'ready'}
+            title={saved ? 'Saved to evidence ledger' : experiment.readiness === 'ready' ? 'Save to evidence ledger' : 'Complete the decision contract before saving'}
+            aria-label={`Save ${experiment.name} to evidence ledger`}
+            className="inline-flex h-8 items-center gap-2 rounded-md border border-slate-700 px-2.5 text-[11px] font-semibold text-slate-300 hover:border-emerald-500/50 hover:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : saved ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
+            {saved ? 'Saved' : 'Save'}
+          </button>
+        </div>
       </div>
 
       <div className="mt-4 grid gap-x-4 gap-y-3 border-y border-slate-800 py-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -297,6 +429,198 @@ function ExperimentRow({ experiment, rank, onCopy }: {
         </div>
       )}
     </article>
+  )
+}
+
+function LedgerRow({ experiment, busy, recording, onRecord, onAction }: {
+  experiment: ExperimentLedgerRow
+  busy: boolean
+  recording: boolean
+  onRecord: () => void
+  onAction: (action: ExperimentActionInput) => void
+}) {
+  const evidence = computeExperimentEvidence(experiment)
+  const canRecord = experiment.status === 'running' || experiment.status === 'analyzing'
+
+  return (
+    <article className="px-4 py-5">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-semibold text-slate-100">{experiment.name}</h3>
+            <StatusPill tone={ledgerStatusTone(experiment.status)}>{experiment.status}</StatusPill>
+            <StatusPill tone={evidence.label === 'sample-complete' ? 'success' : evidence.label === 'directional' ? 'warn' : 'neutral'}>
+              {evidence.label.replace('-', ' ')}
+            </StatusPill>
+          </div>
+          <p className="mt-2 max-w-3xl text-xs leading-5 text-slate-400">{experiment.hypothesis}</p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {experiment.status === 'ready' && (
+            <ActionButton icon={Play} label="Start" busy={busy} onClick={() => onAction({ action: 'start' })} />
+          )}
+          {experiment.status === 'running' && (
+            <ActionButton icon={SearchCheck} label="Analyze" busy={busy} onClick={() => onAction({ action: 'analyze' })} />
+          )}
+          {canRecord && (
+            <ActionButton icon={CheckCircle2} label="Record outcome" busy={busy} active={recording} onClick={onRecord} />
+          )}
+          {experiment.status === 'decided' && (
+            <ActionButton icon={Archive} label="Archive" busy={busy} onClick={() => onAction({ action: 'archive' })} />
+          )}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-4 border-y border-slate-800 py-3 sm:grid-cols-2 lg:grid-cols-4">
+        <EvidenceProgress label="Minimum sample" value={evidence.sampleProgressPct} detail={`${Math.min(experiment.controlExposures, experiment.treatmentExposures)} / ${experiment.minimumSamplePerVariant} each`} />
+        <EvidenceProgress label="Planned duration" value={evidence.durationProgressPct} detail={`${experiment.plannedDurationDays} days planned`} />
+        <Detail label="Observed lift" value={evidence.observedLiftPct === null ? null : formatPercent(evidence.observedLiftPct)} />
+        <Detail label="Decision" value={experiment.decision ? decisionLabel(experiment.decision) : null} />
+      </div>
+
+      <div className="mt-3 flex flex-col gap-1 text-[11px] leading-4 text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+        <span>{evidence.note}</span>
+        <span className="shrink-0">Updated {formatDate(experiment.updatedAt)}</span>
+      </div>
+      {experiment.conclusion && <p className="mt-3 border-l-2 border-cyan-500 pl-3 text-xs leading-5 text-slate-300">{experiment.conclusion}</p>}
+
+      {recording && (
+        <OutcomeForm
+          busy={busy}
+          onSubmit={(action) => onAction(action)}
+        />
+      )}
+    </article>
+  )
+}
+
+function OutcomeForm({ busy, onSubmit }: {
+  busy: boolean
+  onSubmit: (action: Extract<ExperimentActionInput, { action: 'decide' }>) => void
+}) {
+  const [controlExposures, setControlExposures] = useState('')
+  const [treatmentExposures, setTreatmentExposures] = useState('')
+  const [controlValue, setControlValue] = useState('')
+  const [treatmentValue, setTreatmentValue] = useState('')
+  const [guardrailControlValue, setGuardrailControlValue] = useState('')
+  const [guardrailTreatmentValue, setGuardrailTreatmentValue] = useState('')
+  const [decision, setDecision] = useState<ExperimentDecision>('inconclusive')
+  const [conclusion, setConclusion] = useState('')
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault()
+    onSubmit({
+      action: 'decide',
+      controlExposures: Number(controlExposures),
+      treatmentExposures: Number(treatmentExposures),
+      controlValue: Number(controlValue),
+      treatmentValue: Number(treatmentValue),
+      guardrailControlValue: guardrailControlValue === '' ? null : Number(guardrailControlValue),
+      guardrailTreatmentValue: guardrailTreatmentValue === '' ? null : Number(guardrailTreatmentValue),
+      decision,
+      conclusion,
+    })
+  }
+
+  return (
+    <form onSubmit={submit} className="mt-4 border-t border-slate-800 pt-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <NumberField label="Control exposures" value={controlExposures} onChange={setControlExposures} integer />
+        <NumberField label="Treatment exposures" value={treatmentExposures} onChange={setTreatmentExposures} integer />
+        <NumberField label="Control metric" value={controlValue} onChange={setControlValue} />
+        <NumberField label="Treatment metric" value={treatmentValue} onChange={setTreatmentValue} />
+        <NumberField label="Control guardrail" value={guardrailControlValue} onChange={setGuardrailControlValue} optional />
+        <NumberField label="Treatment guardrail" value={guardrailTreatmentValue} onChange={setGuardrailTreatmentValue} optional />
+        <label className="block">
+          <span className="text-[10px] font-semibold uppercase text-slate-500">Decision</span>
+          <select value={decision} onChange={(event) => setDecision(event.target.value as ExperimentDecision)} className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-xs text-slate-200 focus:border-emerald-500 focus:outline-none">
+            <option value="inconclusive">Inconclusive</option>
+            <option value="promote_treatment">Promote treatment</option>
+            <option value="promote_control">Keep control</option>
+            <option value="iterate">Iterate</option>
+            <option value="stop">Stop</option>
+          </select>
+        </label>
+      </div>
+      <label className="mt-3 block">
+        <span className="text-[10px] font-semibold uppercase text-slate-500">Conclusion</span>
+        <textarea
+          required
+          minLength={8}
+          rows={3}
+          value={conclusion}
+          onChange={(event) => setConclusion(event.target.value)}
+          placeholder="What did we learn, what will change, and what remains uncertain?"
+          className="mt-1 w-full resize-none rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-xs leading-5 text-slate-200 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
+        />
+      </label>
+      <div className="mt-3 flex justify-end">
+        <button type="submit" disabled={busy} className="inline-flex h-8 items-center gap-2 rounded-md bg-emerald-500 px-3 text-xs font-bold text-slate-950 hover:bg-emerald-400 disabled:opacity-50">
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+          Preserve decision
+        </button>
+      </div>
+    </form>
+  )
+}
+
+function NumberField({ label, value, onChange, integer = false, optional = false }: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  integer?: boolean
+  optional?: boolean
+}) {
+  return (
+    <label className="block">
+      <span className="text-[10px] font-semibold uppercase text-slate-500">{label}</span>
+      <input
+        required={!optional}
+        type="number"
+        min={integer ? 0 : undefined}
+        step={integer ? 1 : 'any'}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-xs tabular-nums text-slate-200 focus:border-emerald-500 focus:outline-none"
+      />
+    </label>
+  )
+}
+
+function ActionButton({ icon: Icon, label, busy, active = false, onClick }: {
+  icon: typeof Play
+  label: string
+  busy: boolean
+  active?: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={onClick}
+      className={cn(
+        'inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-[11px] font-semibold disabled:opacity-50',
+        active ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 text-slate-300 hover:border-emerald-500/50 hover:text-emerald-300',
+      )}
+    >
+      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Icon className="h-3.5 w-3.5" />}
+      {label}
+    </button>
+  )
+}
+
+function EvidenceProgress({ label, value, detail }: { label: string; value: number; detail: string }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2 text-[10px] font-semibold uppercase text-slate-500">
+        <span>{label}</span><span className="tabular-nums text-slate-400">{value}%</span>
+      </div>
+      <div className="mt-1.5 h-1.5 overflow-hidden rounded bg-slate-800">
+        <div className="h-full bg-cyan-500" style={{ width: `${value}%` }} />
+      </div>
+      <div className="mt-1 text-[10px] text-slate-600">{detail}</div>
+    </div>
   )
 }
 
@@ -367,6 +691,28 @@ function readinessTone(readiness: ExperimentReadiness): StatusTone {
   if (readiness === 'ready') return 'success'
   if (readiness === 'needs-work') return 'warn'
   return 'neutral'
+}
+
+function ledgerStatusTone(status: ExperimentLedgerRow['status']): StatusTone {
+  if (status === 'running') return 'info'
+  if (status === 'analyzing') return 'warn'
+  if (status === 'decided') return 'success'
+  return 'neutral'
+}
+
+function decisionLabel(decision: ExperimentDecision): string {
+  const labels: Record<ExperimentDecision, string> = {
+    promote_control: 'Keep control',
+    promote_treatment: 'Promote treatment',
+    iterate: 'Iterate',
+    inconclusive: 'Inconclusive',
+    stop: 'Stop',
+  }
+  return labels[decision]
+}
+
+function formatPercent(value: number): string {
+  return `${value > 0 ? '+' : ''}${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}%`
 }
 
 function runPlan(experiment: MarketingExperiment): string | null {

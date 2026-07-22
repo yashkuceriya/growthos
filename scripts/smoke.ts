@@ -65,7 +65,7 @@ async function checkSupabaseReachability(): Promise<boolean> {
 // ── DB: tables + RPCs + schema cache ───────────────────────────────
 async function checkDb() {
   section('Database tables + RPCs')
-  const tables = ['projects', 'ad_copies', 'leads', 'campaigns', 'ai_cost_ledger', 'ingest_jobs', 'webhook_endpoints', 'webhook_deliveries', 'idempotency_records', 'api_key_rate_limits', 'api_keys']
+  const tables = ['projects', 'ad_copies', 'leads', 'campaigns', 'marketing_experiments', 'ai_cost_ledger', 'ingest_jobs', 'webhook_endpoints', 'webhook_deliveries', 'idempotency_records', 'api_key_rate_limits', 'api_keys']
   for (const t of tables) {
     const { error } = await sb.from(t).select('*', { count: 'exact', head: true }).limit(1)
     if (error) bad(`table ${t} (read): ${error.message}`); else ok(`table ${t} (read)`)
@@ -75,7 +75,7 @@ async function checkDb() {
   // mutations; a stale cache makes INSERTs fail with PGRST205 even when
   // SELECTs work. Run a no-op insert with explicit ON CONFLICT to detect
   // the stale-cache state without actually writing rows.
-  const writeProbeTables = ['api_keys', 'webhook_endpoints', 'ingest_jobs', 'idempotency_records']
+  const writeProbeTables = ['api_keys', 'webhook_endpoints', 'ingest_jobs', 'idempotency_records', 'marketing_experiments']
   for (const t of writeProbeTables) {
     const { error } = await sb.from(t).insert({}).select()
     if (error?.code === 'PGRST205') {
@@ -134,6 +134,7 @@ async function checkHttp() {
     { path: '/api/v1/health', expectedStatus: 401, label: 'v1/health (no auth → 401)' },
     { path: '/api/v1/projects', expectedStatus: 401, label: 'v1/projects (no auth → 401)' },
     { path: '/api/dashboard/health', expectedStatus: 401, label: 'dashboard/health (no auth → 401)' },
+    { path: '/api/experiments', expectedStatus: 401, label: 'experiments (no auth → 401)' },
     { path: '/api/jobs/ingest-tick', expectedStatus: 401, label: 'cron tick rejects no-auth' },
     { path: '/api/webhooks/dispatch-tick', expectedStatus: 401, label: 'webhook dispatch tick rejects no-auth' },
   ]

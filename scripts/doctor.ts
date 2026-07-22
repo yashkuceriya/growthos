@@ -101,12 +101,13 @@ const requiredMigrations = [
   '027_restore_api_surface.sql',
   '028_asset_quality_metadata.sql',
   '029_persona_intelligence.sql',
+  '030_experiment_evidence_ledger.sql',
 ]
 const missingMigrations = requiredMigrations.filter((file) => !migrations.includes(file))
 
 checks.push({
   name: 'Supabase migrations',
-  ok: migrations.length >= 29 && missingMigrations.length === 0,
+  ok: migrations.length >= 30 && missingMigrations.length === 0,
   detail: missingMigrations.length > 0
     ? `${migrations.length} migration files found; missing ${missingMigrations.join(', ')}`
     : `${migrations.length} migration files found, latest ${migrations.at(-1) ?? 'none'}`,

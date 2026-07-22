@@ -114,6 +114,86 @@ export interface Database {
           metadata?: Json
         }
       }
+      marketing_experiments: {
+        Row: {
+          id: string
+          user_id: string
+          project_id: string
+          campaign_id: string | null
+          persona_id: string | null
+          name: string
+          hypothesis: string
+          variable: string
+          control: string
+          treatment: string
+          primary_metric: string
+          guardrail_metric: string
+          target_improvement_pct: number
+          planned_duration_days: number
+          minimum_sample_per_variant: number
+          decision_rule: string
+          channel: string | null
+          status: 'draft' | 'ready' | 'running' | 'analyzing' | 'decided' | 'archived'
+          source: 'manual' | 'sprint' | 'campaign' | 'agent'
+          source_key: string | null
+          design_snapshot: Json
+          started_at: string | null
+          ended_at: string | null
+          control_exposures: number
+          treatment_exposures: number
+          control_value: number | null
+          treatment_value: number | null
+          guardrail_control_value: number | null
+          guardrail_treatment_value: number | null
+          observed_lift_pct: number | null
+          decision: 'promote_control' | 'promote_treatment' | 'iterate' | 'inconclusive' | 'stop' | null
+          conclusion: string | null
+          metadata: Json
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          project_id: string
+          campaign_id?: string | null
+          persona_id?: string | null
+          name: string
+          hypothesis: string
+          variable: string
+          control: string
+          treatment: string
+          primary_metric: string
+          guardrail_metric: string
+          target_improvement_pct: number
+          planned_duration_days: number
+          minimum_sample_per_variant: number
+          decision_rule: string
+          channel?: string | null
+          status?: 'draft' | 'ready' | 'running' | 'analyzing' | 'decided' | 'archived'
+          source?: 'manual' | 'sprint' | 'campaign' | 'agent'
+          source_key?: string | null
+          design_snapshot?: Json
+          metadata?: Json
+        }
+        Update: {
+          campaign_id?: string | null
+          persona_id?: string | null
+          status?: 'draft' | 'ready' | 'running' | 'analyzing' | 'decided' | 'archived'
+          started_at?: string | null
+          ended_at?: string | null
+          control_exposures?: number
+          treatment_exposures?: number
+          control_value?: number | null
+          treatment_value?: number | null
+          guardrail_control_value?: number | null
+          guardrail_treatment_value?: number | null
+          observed_lift_pct?: number | null
+          decision?: 'promote_control' | 'promote_treatment' | 'iterate' | 'inconclusive' | 'stop' | null
+          conclusion?: string | null
+          metadata?: Json
+        }
+      }
       campaign_metrics: {
         Row: {
           id: string

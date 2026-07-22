@@ -15,6 +15,7 @@ import {
   HelpCircle,
   ListChecks,
   Megaphone,
+  Menu,
   Rocket,
   Search,
   Sparkles,
@@ -113,7 +114,7 @@ const commands: Command[] = [
   },
 ]
 
-export function TopBar() {
+export function TopBar({ onOpenNavigation }: { onOpenNavigation?: () => void }) {
   const router = useRouter()
   const pathname = usePathname()
   const { activeProject } = useProject()
@@ -180,7 +181,16 @@ export function TopBar() {
   }
 
   return (
-    <header className="flex h-14 items-center gap-4 border-b border-slate-800 bg-slate-900/80 px-6 backdrop-blur">
+    <header className="flex h-14 items-center gap-2 border-b border-slate-800 bg-slate-900/80 px-3 backdrop-blur sm:gap-4 sm:px-6">
+      <button
+        type="button"
+        onClick={onOpenNavigation}
+        aria-label="Open navigation"
+        title="Open navigation"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-800 hover:text-slate-100 md:hidden"
+      >
+        <Menu className="h-4 w-4" />
+      </button>
       <div className="relative max-w-xl flex-1">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
         <input
@@ -265,7 +275,7 @@ export function TopBar() {
         {healthTone === 'ok' ? 'Healthy' : healthTone === 'warn' ? 'Review' : 'Attention'}
       </Link>
 
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-1 sm:gap-2">
         <button
           type="button"
           aria-label="Notifications"
@@ -280,7 +290,7 @@ export function TopBar() {
         >
           <HelpCircle className="h-4 w-4" />
         </Link>
-        <div className="h-8 w-8 rounded-full bg-emerald-500 ring-1 ring-emerald-400/40" />
+        <div className="hidden h-8 w-8 rounded-full bg-emerald-500 ring-1 ring-emerald-400/40 sm:block" />
       </div>
     </header>
   )

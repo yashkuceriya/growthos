@@ -17,6 +17,11 @@ fast operator workflows rather than SaaS packaging, billing, or team tenancy.
   autonomous multi-agent complexity. They emphasize evals, tool boundaries,
   output validation, guardrails, and human intervention for consequential
   actions.
+- LaunchDarkly separates an experiment's iterations so changing a hypothesis,
+  metric, or variation preserves the previous run. It also distinguishes sample
+  completion from the statistical evidence used to make a decision.
+- Optimizely identifies sample size, effect size, and complete business cycles
+  as separate inputs to trustworthy experiment decisions.
 
 Primary sources:
 
@@ -26,23 +31,26 @@ Primary sources:
 - https://openai.com/business/guides-and-resources/a-practical-guide-to-building-ai-agents/
 - https://www.anthropic.com/engineering/building-effective-agents
 - https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents
+- https://launchdarkly.com/docs/home/experimentation/manage
+- https://launchdarkly.com/docs/home/experimentation/size
+- https://www.optimizely.com/optimization-glossary/statistical-significance
 
 ## Product Gaps
 
-1. Experiment ideas are generated in several places but do not share one
-   decision contract or quality gate.
-2. The Agency hub links to `/agency/experiments`, but that workspace did not
-   exist.
-3. Agent output quality is scored for assets, but workflow-level agent results
+1. Experiment contracts and results now share a durable ledger, but automatic
+   metric ingestion and campaign-asset attribution remain manual.
+2. Agent output quality is scored for assets, but workflow-level agent results
    do not yet have regression evals or explicit approval thresholds.
-4. Campaign learning exists, but durable experiment history should eventually
-   connect hypothesis, exposure, outcome, decision, and the next generated plan.
-5. Automation is broad, but the operator still needs one queue showing what is
+3. Campaign learning exists, but experiment conclusions do not yet update the
+   next sprint or persona memory automatically.
+4. Automation is broad, but the operator still needs one queue showing what is
    proposed, what can run automatically, and what requires approval.
 
 ## Delivery Plan
 
 ### Phase 1: Experiment Command Center
+
+Status: complete.
 
 - Create a real experiment workspace from the current weekly sprint.
 - Require one changed variable, primary and guardrail metrics, target lift,
@@ -53,11 +61,15 @@ Primary sources:
 
 ### Phase 2: Durable Evidence Ledger
 
-- Add an experiment ledger once the restored Supabase project is stable.
-- Record status, control/treatment exposure, metric snapshots, decision, and
-  linked campaign/assets without overwriting prior sprints.
-- Add a low-traffic mode that reports directional evidence without claiming
+Status: core ledger complete; automatic evidence ingestion remains.
+
+- Preserve immutable experiment designs with explicit lifecycle transitions.
+- Record control/treatment exposure, metric snapshots, decision, conclusion,
+  and linked campaign/persona without overwriting prior sprints.
+- Report no-signal, directional, and sample-complete evidence without claiming
   statistical significance.
+- Next: ingest campaign metrics into running experiments and propose, but never
+  silently apply, resulting campaign or persona-memory changes.
 
 ### Phase 3: Agent Evaluation Harness
 

@@ -34,7 +34,7 @@ const primaryNav = [
   { href: '/observability', label: 'Observability', icon: AlertTriangle },
 ]
 
-export function AppSidebar() {
+export function AppSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
@@ -84,6 +84,7 @@ export function AppSidebar() {
             <Link
               key={href}
               href={href}
+              onClick={onNavigate}
               className={cn(
                 'relative flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
                 active
@@ -105,6 +106,7 @@ export function AppSidebar() {
       <div className="px-3 py-3 border-t border-slate-800">
         <Link
           href="/campaigns"
+          onClick={onNavigate}
           className="flex w-full items-center justify-center gap-2 rounded-md bg-emerald-500 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-950 hover:bg-emerald-400 transition-colors"
         >
           <Plus className="h-4 w-4" strokeWidth={2.5} />
@@ -116,6 +118,7 @@ export function AppSidebar() {
       <div className="px-2 pb-3 space-y-0.5">
         <Link
           href="/settings"
+          onClick={onNavigate}
           className={cn(
             'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
             pathname === '/settings'
@@ -128,6 +131,7 @@ export function AppSidebar() {
         </Link>
         <Link
           href="/support"
+          onClick={onNavigate}
           className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-slate-400 hover:bg-slate-800/60 hover:text-slate-100 transition-colors"
         >
           <HelpCircle className="h-4 w-4" />

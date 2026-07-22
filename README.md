@@ -37,8 +37,9 @@ Open [http://localhost:3000](http://localhost:3000) with your browser.
 - `src/proxy.ts` refreshes Supabase auth cookies before route rendering. If auth
   starts behaving strangely, run `npm run doctor` first.
 - Supabase migrations live in `supabase/migrations`. If a restore only brings
-  back core product tables, apply migrations `027` through `029`; they restore
-  the API surface, asset quality metadata, and persona intelligence.
+  back core product tables, apply migrations `027` through `030`; they restore
+  the API surface, asset quality metadata, persona intelligence, and durable
+  experiment evidence.
 - The local admin is `local@growthos.dev` / `GrowthOS-local-2026!`. In
   development only, the login page can also unlock a fallback local workspace if
   Supabase auth is unavailable.
