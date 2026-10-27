@@ -4,8 +4,10 @@ const state = {
   user: { id: 'user_1' } as { id: string } | null,
   current: null as Record<string, unknown> | null,
   updated: null as Record<string, unknown> | null,
+  conflict: false,
 }
 const updates: Array<Record<string, unknown>> = []
+const filters: Array<[string, unknown]> = []
 
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
@@ -19,8 +21,11 @@ vi.mock('@/lib/supabase/server', () => ({
           updates.push(value)
           return builder
         },
-        eq: () => builder,
-        maybeSingle: async () => ({ data: state.current, error: null }),
+        eq: (key: string, value: unknown) => { filters.push([key, value]); return builder },
+        maybeSingle: async () => ({
+          data: patch ? state.conflict ? null : state.updated ?? { ...state.current, ...patch } : state.current,
+          error: null,
+        }),
         single: async () => ({ data: state.updated ?? (patch ? { ...state.current, ...patch } : null), error: null }),
       }
       return builder
@@ -47,7 +52,9 @@ beforeEach(() => {
   state.user = { id: 'user_1' }
   state.current = ready
   state.updated = null
+  state.conflict = false
   updates.length = 0
+  filters.length = 0
 })
 
 describe('experiment lifecycle API', () => {
@@ -80,5 +87,15 @@ describe('experiment lifecycle API', () => {
     }))
     expect(response.status).toBe(200)
     expect(updates[0]).toMatchObject({ status: 'decided', observed_lift_pct: 20, decision: 'promote_treatment' })
+  })
+
+  it('uses the observed status and timestamp to protect against concurrent writes', async () => {
+    state.conflict = true
+    const response = await PATCH(new Request('https://app.test/api/experiments/experiment_1', {
+      method: 'PATCH', body: JSON.stringify({ action: 'start' }),
+    }))
+    expect(response.status).toBe(409)
+    expect(filters).toContainEqual(['status', 'ready'])
+    expect(filters).toContainEqual(['updated_at', ready.updated_at])
   })
 })

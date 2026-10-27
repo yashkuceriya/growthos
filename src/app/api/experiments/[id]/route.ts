@@ -43,12 +43,15 @@ async function handlePatch(request: Request) {
     .update(patch)
     .eq('id', id)
     .eq('user_id', user.id)
+    .eq('status', current.status)
+    .eq('updated_at', current.updatedAt)
     .select('*')
-    .single()
+    .maybeSingle()
 
-  if (error || !data) {
+  if (error) {
     return Response.json({ error: error?.message ?? 'Could not update experiment' }, { status: 500 })
   }
+  if (!data) return Response.json({ error: 'Experiment changed since it was loaded. Refresh and try again.' }, { status: 409 })
   return Response.json({ experiment: normalizeExperimentLedgerRow(data) })
 }
 

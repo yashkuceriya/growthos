@@ -89,4 +89,23 @@ describe('experiment evidence ledger', () => {
     expect(row.targetImprovementPct).toBe(12.5)
     expect(row.status).toBe('running')
   })
+
+  it('does not round an incomplete sample into completed evidence', () => {
+    const evidence = computeExperimentEvidence({
+      ...baseRow, startedAt: '2026-07-01T00:00:00Z', endedAt: '2026-07-08T00:00:00Z',
+      minimumSamplePerVariant: 1000, controlExposures: 999, treatmentExposures: 1000,
+      controlValue: 10, treatmentValue: 12,
+    })
+    expect(evidence.label).toBe('directional')
+    expect(evidence.sampleProgressPct).toBe(99)
+  })
+
+  it('does not round a nearly finished duration into completed evidence', () => {
+    const evidence = computeExperimentEvidence({
+      ...baseRow, startedAt: '2026-07-01T00:00:00Z', endedAt: '2026-07-07T23:59:00Z',
+      controlExposures: 100, treatmentExposures: 100, controlValue: 10, treatmentValue: 12,
+    })
+    expect(evidence.label).toBe('directional')
+    expect(evidence.durationProgressPct).toBe(99)
+  })
 })

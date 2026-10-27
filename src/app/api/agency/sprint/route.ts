@@ -6,6 +6,8 @@ import { z } from 'zod'
 import { trackAICost } from '@/lib/cost-tracker'
 import { wrapHandler } from '@/lib/api-error'
 import { mergeBrandVoice } from '@/lib/brand-voice'
+import { normalizeExperimentLedgerRow } from '@/lib/marketing/experiment-ledger'
+import { buildExperimentLearning, experimentLearningPrompt } from '@/lib/marketing/experiment-learning'
 
 export const maxDuration = 120
 
@@ -40,6 +42,10 @@ const SprintPlanSchema = z.object({
     action: z.string(),
   })).describe('Daily check-in tasks like "review yesterday metrics" or "respond to Reddit comments"'),
   week_end_review: z.string().describe('What the agency will report on Sunday'),
+  evidence_review: z.array(z.object({
+    experiment_id: z.string(),
+    application: z.string().min(8).max(1_000).describe('How this observed lesson changes the next sprint; retain its uncertainty'),
+  })).max(12).describe('Relevant completed experiments actually used; empty if none are relevant'),
 })
 
 async function handlePost(request: Request) {
@@ -47,14 +53,22 @@ async function handlePost(request: Request) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { projectId } = await request.json()
-  if (!projectId) return Response.json({ error: 'projectId required' }, { status: 400 })
+  const parsed = z.object({ projectId: z.string().min(1) }).safeParse(await request.json().catch(() => null))
+  if (!parsed.success) return Response.json({ error: 'projectId required' }, { status: 400 })
+  const { projectId } = parsed.data
+
+  const { data: project } = await supabase.from('projects').select('name, description, brand_voice').eq('id', projectId).eq('user_id', user.id).maybeSingle()
+  if (!project) return Response.json({ error: 'Not found' }, { status: 404 })
+
+  const { data: experimentRows, error: evidenceError } = await supabase
+    .from('marketing_experiments').select('*')
+    .eq('project_id', projectId).eq('user_id', user.id)
+    .order('updated_at', { ascending: false })
+  if (evidenceError) return Response.json({ error: 'Experiment history is unavailable. Check database setup before generating a sprint.' }, { status: 503 })
+  const learning = buildExperimentLearning((experimentRows ?? []).map(normalizeExperimentLedgerRow), projectId)
 
   const budget = await checkBudget(supabase, projectId)
   if (!budget.ok) return budgetExceededResponse(budget)
-
-  const { data: project } = await supabase.from('projects').select('name, description, brand_voice').eq('id', projectId).maybeSingle()
-  if (!project) return Response.json({ error: 'Not found' }, { status: 404 })
 
   const bv = (project.brand_voice as Record<string, unknown>) ?? {}
 
@@ -70,19 +84,26 @@ VALUE PROP: ${bv.value_proposition ?? project.description ?? ''}
 AUDIENCE: ${bv.target_audience ?? ''}
 CURRENT THEME: ${bv.positioning_statement ?? ''}
 
-Design this week's marketing sprint. Week starts Monday. Balance paid/organic/content/community/outreach.` }],
-  })
+${experimentLearningPrompt(learning)}
 
-  // Atomic shallow merge via RPC
-  const week = new Date().toISOString().slice(0, 10)
-  await mergeBrandVoice(supabase, projectId, {
-    current_sprint: { ...res.object, week_start: week },
-    sprint_generated_at: new Date().toISOString(),
+Design this week's marketing sprint. Week starts Monday. Balance paid/organic/content/community/outreach.` }],
   })
 
   await trackAICost({
     userId: user.id, projectId, module: 'agency_sprint',
     costUsd: 0.07, latencyMs: Date.now() - startedAt,
+  })
+
+  const knownIds = new Set(learning.completed.map((experiment) => experiment.id))
+  if (res.object.evidence_review.some((item) => !knownIds.has(item.experiment_id))) {
+    return Response.json({ error: 'Generated sprint cited unknown experiment evidence. Try again.' }, { status: 502 })
+  }
+
+  // Atomic shallow merge via RPC
+  const week = new Date().toISOString().slice(0, 10)
+  await mergeBrandVoice(supabase, projectId, {
+    current_sprint: { ...res.object, week_start: week, evidence_snapshot: learning },
+    sprint_generated_at: new Date().toISOString(),
   })
 
   return Response.json({ sprint: res.object })

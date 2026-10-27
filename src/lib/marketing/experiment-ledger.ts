@@ -174,7 +174,11 @@ export function computeExperimentEvidence(row: ExperimentLedgerRow, now = new Da
   const observedLiftPct = row.observedLiftPct ?? relativeLift(row.controlValue, row.treatmentValue)
   const guardrailDeltaPct = relativeLift(row.guardrailControlValue, row.guardrailTreatmentValue)
   const hasSignal = row.controlValue !== null && row.treatmentValue !== null && smallestSample > 0
-  const sampleComplete = hasSignal && sampleProgressPct >= 100 && durationProgressPct >= 100
+  const sampleComplete = hasSignal
+    && smallestSample >= row.minimumSamplePerVariant
+    && row.minimumSamplePerVariant > 0
+    && elapsedDays >= row.plannedDurationDays
+    && row.plannedDurationDays > 0
 
   if (!hasSignal) {
     return {
@@ -263,7 +267,7 @@ function durationDays(start: string | null, end: string | null, now: Date): numb
 
 function progress(value: number, target: number): number {
   if (target <= 0) return 0
-  return Math.min(100, Math.max(0, Math.round((value / target) * 100)))
+  return Math.min(value >= target ? 100 : 99, Math.max(0, Math.round((value / target) * 100)))
 }
 
 function string(value: unknown): string {

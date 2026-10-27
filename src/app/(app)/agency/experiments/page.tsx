@@ -63,6 +63,9 @@ export default function ExperimentsPage() {
     if (!activeProject) return
     setLoading(true)
     setLedgerError(null)
+    setLedger([])
+    setCampaigns([])
+    setOutcomeId(null)
     const localBrandVoice = object(activeProject.brand_voice)
     setBrandVoice(localBrandVoice)
     if (activeProject.id === LOCAL_DEV_PROJECT_ID) {
@@ -92,6 +95,8 @@ export default function ExperimentsPage() {
         const payload = await ledgerResponse.json().catch(() => ({})) as { error?: string }
         setLedgerError(payload.error ?? 'The evidence ledger could not be loaded.')
       }
+    } catch (error) {
+      setLedgerError(error instanceof Error ? error.message : 'The evidence ledger could not be loaded.')
     } finally {
       setLoading(false)
     }
@@ -108,6 +113,9 @@ export default function ExperimentsPage() {
   const northStar = text(sprint.north_star)
   const sprintTheme = text(sprint.sprint_theme)
   const sprintWeek = text(sprint.week_start) ?? 'current'
+  const evidenceReview = Array.isArray(sprint.evidence_review) ? sprint.evidence_review.map(object) : []
+  const evidenceSnapshot = object(sprint.evidence_snapshot)
+  const evidenceSources = Array.isArray(evidenceSnapshot.completed) ? evidenceSnapshot.completed.map(object) : []
   const savedSourceKeys = useMemo(() => new Set(ledger.map((item) => item.sourceKey)), [ledger])
 
   async function generateSprint() {
@@ -185,6 +193,7 @@ export default function ExperimentsPage() {
         body: JSON.stringify(action),
       })
       const payload = await response.json()
+      if (response.status === 409) await refresh()
       if (!response.ok) throw new Error(payload.error ?? 'Could not update experiment')
       setLedger((current) => current.map((item) => item.id === id ? payload.experiment : item))
       setOutcomeId(null)
@@ -306,6 +315,25 @@ export default function ExperimentsPage() {
         </div>
       )}
 
+      {evidenceReview.length > 0 && (
+        <SectionPanel className="mt-5" title="Lessons used in this sprint">
+          <div className="divide-y divide-slate-800">
+            {evidenceReview.map((review, index) => {
+              const source = evidenceSources.find((item) => item.id === review.experiment_id)
+              return (
+                <div key={`${String(review.experiment_id)}:${index}`} className="py-3 first:pt-0 last:pb-0">
+                  <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-200">
+                    <span>{text(source?.name) ?? String(review.experiment_id)}</span>
+                    {text(source?.evidence) && <StatusPill tone="neutral">{String(source?.evidence)}</StatusPill>}
+                  </div>
+                  <p className="mt-1 text-xs leading-5 text-slate-400">{text(review.application)}</p>
+                </div>
+              )
+            })}
+          </div>
+        </SectionPanel>
+      )}
+
       <SectionPanel
         className="mt-5"
         title={<span className="flex items-center gap-2"><History className="h-3.5 w-3.5 text-cyan-300" />Durable evidence ledger</span>}
@@ -315,7 +343,7 @@ export default function ExperimentsPage() {
         {ledgerError ? (
           <div className="flex gap-2 px-4 py-5 text-xs leading-5 text-amber-200/80">
             <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
-            <span>{ledgerError} Apply Supabase migration 030, then refresh this page.</span>
+            <span>{ledgerError} Check the connection and database setup, then refresh. Restored databases require migrations 029 and 030 in that order.</span>
           </div>
         ) : ledger.length ? (
           <div className="divide-y divide-slate-800">

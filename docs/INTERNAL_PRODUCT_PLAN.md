@@ -41,8 +41,8 @@ Primary sources:
    metric ingestion and campaign-asset attribution remain manual.
 2. Agent output quality is scored for assets, but workflow-level agent results
    do not yet have regression evals or explicit approval thresholds.
-3. Campaign learning exists, but experiment conclusions do not yet update the
-   next sprint or persona memory automatically.
+3. Completed experiment evidence now informs sprint planning with validated
+   citations and a saved evidence snapshot. Persona-memory updates remain manual.
 4. Automation is broad, but the operator still needs one queue showing what is
    proposed, what can run automatically, and what requires approval.
 
@@ -68,8 +68,46 @@ Status: core ledger complete; automatic evidence ingestion remains.
   and linked campaign/persona without overwriting prior sprints.
 - Report no-signal, directional, and sample-complete evidence without claiming
   statistical significance.
-- Next: ingest campaign metrics into running experiments and propose, but never
-  silently apply, resulting campaign or persona-memory changes.
+- Sprint planning consumes completed decisions, including archived lessons,
+  plus ongoing tests to avoid repeating active experiments. It preserves sample,
+  duration, lift, and missing guardrail caveats in the input and saves that input
+  alongside validated experiment citations and the generated plan.
+- Next: define explicit control/treatment attribution and metric direction before
+  ingesting campaign metrics into running experiments. Aggregate campaign totals
+  cannot safely identify experiment variants.
+
+### October 2026 Delivery: Evidence Into Planning
+
+Status: implemented with deterministic and mocked-provider regression tests.
+
+Research supports maintaining each run's configuration and feeding measured
+feedback into subsequent work:
+
+- https://launchdarkly.com/docs/home/experimentation/start-stop-exp
+- https://www.anthropic.com/research/building-effective-agents
+
+This delivery closes the ledger-to-sprint feedback loop, rejects unknown source
+citations, and retains the exact evidence supplied to the model for later review.
+The command center shows which lessons influenced the current sprint. A first
+sprint can proceed with empty history; unavailable history reports an error
+before a model call. This requires the existing database migrations, not a new
+provider integration or migration.
+
+Lifecycle writes now compare the previously read status and update timestamp,
+returning a conflict when another request has already changed the row. Sample
+and duration labels use exact thresholds; rounded progress cannot mark an
+unfinished run complete.
+
+Next priorities, in order:
+
+1. Variant attribution and explicit higher/lower-is-better metric contracts.
+2. Fixed project fixtures for agent evaluation across provider/model changes.
+3. Reviewed proposals to apply experiment lessons to persona/channel memory.
+4. One operator queue for proposed campaign, budget, and publishing actions.
+
+Restore order: apply migration 029 (personas) before 030 (experiment ledger).
+Migration 030 references the persona table; applying it alone to a core-only
+restore will fail.
 
 ### Phase 3: Agent Evaluation Harness
 
